@@ -72,12 +72,14 @@ fn main_real() -> Result<(), Box<dyn Error>> {
 
     let mut asm = Asm::new(lexer);
     asm.str_int.intern(input); // dont forget to intern the input name
-    let def_file = asm.str_int.intern("DEFINES");
+    let def_file = asm.str_int.intern("__DEFINES__");
+    let def_unit = asm.str_int.intern("__STATIC__");
     for (name, val) in &args.define {
         let string = asm.str_int.intern(name);
         asm.syms.push(Sym::new(
             Label::new(None, string),
             Expr::Const(*val),
+            def_unit,
             def_file,
             Pos(0, 0),
         ));
@@ -178,6 +180,9 @@ fn main_real() -> Result<(), Box<dyn Error>> {
                 output.write_all(&expr.len().to_le_bytes())?;
             }
         }
+        let index = asm.str_int.offset(sym.unit).unwrap();
+        output.write_all(&index.to_le_bytes())?;
+        output.write_all(&sym.unit.len().to_le_bytes())?;
         let index = asm.str_int.offset(sym.file).unwrap();
         output.write_all(&index.to_le_bytes())?;
         output.write_all(&sym.file.len().to_le_bytes())?;
@@ -415,8 +420,9 @@ impl<'a> Asm<'a> {
                     } else {
                         // save in the symbol table with temporary value
                         let index = self.syms.len();
+                        let unit = self.str_int.intern("__STATIC__");
                         self.syms
-                            .push(Sym::new(label, Expr::Const(0), self.tok().file(), pos));
+                            .push(Sym::new(label, Expr::Const(0), unit, self.tok().file(), pos));
                         index
                     };
                     // check if this label is being defined to a value
@@ -730,7 +736,7 @@ impl<'a> Asm<'a> {
                 }
                 Tok::IDENT => {
                     let string = self.str_intern();
-                    let label = if !self.str().starts_with(".") {
+                    let label = if !string.starts_with(".") {
                         Label::new(None, string)
                     } else {
                         Label::new(self.scope, string)
@@ -1247,6 +1253,29 @@ impl<'a> Asm<'a> {
                 };
                 self.section = index;
             }
+            Dir::EXPORT => {
+                self.eat();
+                if self.peek()? != Tok::IDENT {
+                    return Err(self.err("expected symbol name"));
+                }
+                let string = self.str_intern();
+                if string.starts_with(".") {
+                    return Err(self.err("exports must be global"));
+                }
+                if self.emit {
+                    let label = Label::new(None, string);
+                    let unit = self.str_int.intern("__EXPORT__");
+                    if let Some(sym) = self.syms.iter_mut().find(|sym| &sym.label == &label) {
+                        if sym.unit == unit {
+                            return Err(self.err("symbol is already exported"));
+                        }
+                        sym.unit = unit;
+                    } else {
+                        return Err(self.err("cannot export undeclared symbol"));
+                    }
+                }
+                self.eat();
+            }
             Dir::PAD => {
                 self.eat();
                 let expr = self.expr()?;
@@ -1639,6 +1668,7 @@ impl Dir {
     const BYTE: Self = Self("BYTE");
     const WORD: Self = Self("WORD");
     const SECTION: Self = Self("SECTION");
+    const EXPORT: Self = Self("EXPORT");
     const PAD: Self = Self("PAD");
     const ALIGN: Self = Self("ALIGN");
     const INCLUDE: Self = Self("INCLUDE");
@@ -1658,6 +1688,7 @@ const DIRECTIVES: &[Dir] = &[
     Dir::BYTE,
     Dir::WORD,
     Dir::SECTION,
+    Dir::EXPORT,
     Dir::PAD,
     Dir::ALIGN,
     Dir::INCLUDE,
