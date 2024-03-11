@@ -196,7 +196,7 @@ pub struct Sym<'a> {
 }
 
 impl<'a> Sym<'a> {
-    pub fn new(label: Label<'a>, value: Expr<'a>, unit: &'str, file: &'a str, pos: Pos) -> Self {
+    pub fn new(label: Label<'a>, value: Expr<'a>, unit: &'a str, file: &'a str, pos: Pos) -> Self {
         Self {
             label,
             value,

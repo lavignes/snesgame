@@ -307,9 +307,9 @@ impl<'a> Ld<'a> {
             let pos = Pos(line, column);
             // duplicate exported symbol?
             if let Some(other) = self.syms.iter().find(|sym| (sym.label == label) && (sym.unit == unit)) {
-                return Err(self.err_in(file, &format!("duplicate exported symbol {label} found. first defined at {}:{}:{} and again at {sym_file}:{line}:{column}", other.file, other.pos.0, other.pos.1)));
+                return Err(self.err_in(file, &format!("duplicate exported symbol {label} found\n\tdefined at {}:{}:{}\n\tagain at {sym_file}:{line}:{column}", other.file, other.pos.0, other.pos.1)));
             }
-            self.syms.push(Sym::new(label, value, sym_unit, sym_file, pos));
+            self.syms.push(Sym::new(label, value, unit, sym_file, pos));
         }
         // add to sections
         let sections_len: usize = self.read_int(&mut reader)?;
