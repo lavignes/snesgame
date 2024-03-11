@@ -190,15 +190,17 @@ impl<'a> Section<'a> {
 pub struct Sym<'a> {
     pub label: Label<'a>,
     pub value: Expr<'a>,
+    pub unit: &'a str,
     pub file: &'a str,
     pub pos: Pos,
 }
 
 impl<'a> Sym<'a> {
-    pub fn new(label: Label<'a>, value: Expr<'a>, file: &'a str, pos: Pos) -> Self {
+    pub fn new(label: Label<'a>, value: Expr<'a>, unit: &'str, file: &'a str, pos: Pos) -> Self {
         Self {
             label,
             value,
+            unit,
             file,
             pos,
         }
