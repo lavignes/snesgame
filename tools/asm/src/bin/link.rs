@@ -291,16 +291,25 @@ impl<'a> Ld<'a> {
             };
             let index: usize = self.read_int(&mut reader)?;
             let len: usize = self.read_int(&mut reader)?;
+            let unit = str_int.slice(index..(index + len)).unwrap();
+            // hide static symbols under the object file name
+            let unit = if unit == "__STATIC__" {
+                self.str_int.intern(file)
+            } else {
+                self.str_int.intern(unit)
+            };
+            let index: usize = self.read_int(&mut reader)?;
+            let len: usize = self.read_int(&mut reader)?;
             let sym_file = str_int.slice(index..(index + len)).unwrap();
             let sym_file = self.str_int.intern(sym_file);
             let line: usize = self.read_int(&mut reader)?;
             let column: usize = self.read_int(&mut reader)?;
             let pos = Pos(line, column);
-            // duplicate symbol?
-            if let Some(other) = self.syms.iter().find(|sym| sym.label == label) {
-                return Err(self.err_in(file, &format!("duplicate symbol {label} found. first defined at {}:{}:{} and again at {sym_file}:{line}:{column}", other.file, other.pos.0, other.pos.1)));
+            // duplicate exported symbol?
+            if let Some(other) = self.syms.iter().find(|sym| (sym.label == label) && (sym.unit == unit)) {
+                return Err(self.err_in(file, &format!("duplicate exported symbol {label} found. first defined at {}:{}:{} and again at {sym_file}:{line}:{column}", other.file, other.pos.0, other.pos.1)));
             }
-            self.syms.push(Sym::new(label, value, sym_file, pos));
+            self.syms.push(Sym::new(label, value, sym_unit, sym_file, pos));
         }
         // add to sections
         let sections_len: usize = self.read_int(&mut reader)?;
