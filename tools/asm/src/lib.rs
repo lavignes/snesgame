@@ -161,10 +161,18 @@ pub enum ExprNode<'a> {
 }
 
 #[derive(Debug)]
+pub enum RelocVal<'a> {
+    Addr(&'a str, u32),
+    List(&'a [ExprNode<'a>]),
+}
+
+#[derive(Debug)]
 pub struct Reloc<'a> {
     pub offset: usize,
     pub width: u8,
-    pub expr: Expr<'a>,
+    pub value: RelocVal<'a>,
+    pub file: &'a str,
+    pub pos: Pos,
 }
 
 #[derive(Debug)]
