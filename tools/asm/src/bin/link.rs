@@ -4,7 +4,7 @@ use std::{
     collections::{BTreeMap, HashMap},
     error::Error,
     fs::{self, File},
-    io::{self, Read, Write},
+    io::{self, ErrorKind, Read, Write},
     mem,
     path::PathBuf,
     process::ExitCode,
@@ -23,7 +23,7 @@ struct Args {
     objects: Vec<PathBuf>,
 
     /// Config file
-    #[arg(short = 'L', long)]
+    #[arg(short, long)]
     config: PathBuf,
 
     /// Output file (default: stdout)
@@ -82,7 +82,7 @@ fn main_real() -> Result<(), Box<dyn Error>> {
 
     for (name, mem) in &config.memories {
         let name = ld.str_int.intern(&name);
-        ld.memories.push(Memory::new(name, mem.start));
+        ld.memories.push(Memory::new(name, mem.start, mem.size));
     }
 
     for (name, section) in &config.sections {
@@ -105,15 +105,80 @@ fn main_real() -> Result<(), Box<dyn Error>> {
     }
     eprintln!("ok");
 
-    eprint!("linking: ");
+    eprint!("relocating: ");
     for (name, section) in &config.sections {
+        let Ld {
+            ref mut sections,
+            ref mut memories,
+            ..
+        } = ld;
+        let memory = memories
+            .iter_mut()
+            .find(|memory| memory.name == section.load)
+            .unwrap();
+        // TODO section alignment?
+        let section = sections
+            .iter_mut()
+            .find(|section| section.name == name)
+            .unwrap();
+        // we update the section pc to be its absolute start address in memory
+        section.pc = memory.pc;
+        memory.pc += section.data.len() as u32;
+        if memory.pc > memory.len {
+            Err(io::Error::new(
+                ErrorKind::InvalidData,
+                format!("no room left in memory {} for section {name}", memory.name),
+            ))?;
+        }
+        eprint!(".");
+    }
+    eprintln!("ok");
+
+    for pass in 0..1 {
+        eprint!("symbol pass{pass}: ");
+        for i in 0..ld.syms.len() {
+            let value = match ld.syms[i].value {
+                Expr::Const(value) => Expr::Const(value),
+                Expr::Addr(section, pc) => {
+                    let section = ld.sections.iter().find(|sec| sec.name == section).unwrap();
+                    Expr::Const((pc + section.pc) as i32)
+                }
+                Expr::List(expr) => {
+                    if let Some(value) = ld.expr_eval(expr) {
+                        Expr::Const(value)
+                    } else {
+                        Expr::List(expr)
+                    }
+                }
+            };
+            ld.syms[i].value = value;
+        }
+        eprintln!("ok");
+    }
+
+    // TODO assert no more undefined symbols in a loop
+
+    eprint!("linking: ");
+    for i in 0..ld.sections.len() {
+        for reloc in &ld.sections[i].relocs {
+            let value = match reloc.expr {
+                Expr::Const(value) => value,
+                Expr::Addr(section, pc) => {
+                    let section = ld.sections.iter().find(|sec| sec.name == section).unwrap();
+                    (pc + section.pc) as i32
+                }
+                Expr::List(expr) => ld.expr_eval(expr).unwrap(),
+            };
+            // TODO width check
+            ld.sections[i].data[reloc.offset] = value as u8;
+        }
         eprint!(".");
     }
     eprintln!("ok");
 
     eprint!("writing: ");
-    for (name, section) in config.sections {
-        eprint!(".");
+    for section in ld.sections {
+        output.write_all(&section.data)?;
     }
     eprintln!("ok");
 
@@ -140,7 +205,7 @@ impl<'a> Ld<'a> {
     }
 
     fn err(&self, msg: &str) -> io::Error {
-        io::Error::new(io::ErrorKind::InvalidData, msg)
+        io::Error::new(ErrorKind::InvalidData, msg)
     }
 
     fn err_in(&self, file: &str, msg: &str) -> io::Error {
@@ -306,7 +371,11 @@ impl<'a> Ld<'a> {
             let column: usize = self.read_int(&mut reader)?;
             let pos = Pos(line, column);
             // duplicate exported symbol?
-            if let Some(other) = self.syms.iter().find(|sym| (sym.label == label) && (sym.unit == unit)) {
+            if let Some(other) = self
+                .syms
+                .iter()
+                .find(|sym| (sym.label == label) && (sym.unit == unit))
+            {
                 return Err(self.err_in(file, &format!("duplicate exported symbol {label} found\n\tdefined at {}:{}:{}\n\tagain at {sym_file}:{line}:{column}", other.file, other.pos.0, other.pos.1)));
             }
             self.syms.push(Sym::new(label, value, unit, sym_file, pos));
@@ -327,13 +396,14 @@ impl<'a> Ld<'a> {
             let mut data = Vec::new();
             data.extend((0..data_len).map(|_| 0));
             reader.read_exact(&mut data)?;
+            // TODO this seems messy,
             let mut relocs = Vec::new();
             let relocs_len: usize = self.read_int(&mut reader)?;
             for _ in 0..relocs_len {
                 let offset: usize = self.read_int(&mut reader)?;
                 // place the offset relative to the start of the section
                 let offset = offset + (section.pc as usize);
-                let width: usize = self.read_int(&mut reader)?;
+                let width: u8 = self.read_int(&mut reader)?;
                 let ty: u8 = self.read_int(&mut reader)?;
                 let expr = match ty {
                     0 => {
@@ -386,16 +456,91 @@ impl<'a> Ld<'a> {
 
         Ok(())
     }
+
+    fn expr_eval(&self, expr: &[ExprNode<'_>]) -> Option<i32> {
+        let mut scratch = Vec::new();
+        for node in expr.iter() {
+            match *node {
+                ExprNode::Const(value) => scratch.push(value),
+                ExprNode::Label(label) => {
+                    let sym = self.syms.iter().find(|sym| sym.label == label).unwrap();
+                    match sym.value {
+                        Expr::Const(value) => scratch.push(value),
+                        Expr::Addr(section, pc) => {
+                            let section = self
+                                .sections
+                                .iter()
+                                .find(|sec| sec.name == section)
+                                .unwrap();
+                            scratch.push((pc + section.pc) as i32);
+                        }
+                        // expand the sub-expression recursively
+                        Expr::List(expr) => {
+                            if let Some(value) = self.expr_eval(expr) {
+                                scratch.push(value);
+                            } else {
+                                return None;
+                            }
+                        }
+                    }
+                }
+                ExprNode::Op(op) => {
+                    let rhs = scratch.pop().unwrap();
+                    match op {
+                        Op::Unary(Tok::PLUS) => scratch.push(rhs),
+                        Op::Unary(Tok::MINUS) => scratch.push(-rhs),
+                        Op::Unary(Tok::TILDE) => scratch.push(!rhs),
+                        Op::Unary(Tok::BANG) => scratch.push((rhs == 0) as i32),
+                        Op::Unary(Tok::LT) => scratch.push(((rhs as u32) & 0xFF) as i32),
+                        Op::Unary(Tok::GT) => scratch.push((((rhs as u32) & 0xFF00) >> 8) as i32),
+                        Op::Unary(Tok::CARET) => {
+                            scratch.push((((rhs as u32) & 0xFF0000) >> 16) as i32)
+                        }
+                        Op::Binary(tok) => {
+                            let lhs = scratch.pop().unwrap();
+                            match tok {
+                                Tok::PLUS => scratch.push(lhs.wrapping_add(rhs)),
+                                Tok::MINUS => scratch.push(lhs.wrapping_sub(rhs)),
+                                Tok::STAR => scratch.push(lhs.wrapping_mul(rhs)),
+                                Tok::SOLIDUS => scratch.push(lhs.wrapping_div(rhs)),
+                                Tok::MODULUS => scratch.push(lhs.wrapping_rem(rhs)),
+                                Tok::ASL => scratch.push(lhs.wrapping_shl(rhs as u32)),
+                                Tok::ASR => scratch.push(lhs.wrapping_shr(rhs as u32)),
+                                Tok::LSR => {
+                                    scratch.push((lhs as u32).wrapping_shl(rhs as u32) as i32)
+                                }
+                                Tok::LT => scratch.push((lhs < rhs) as i32),
+                                Tok::LTE => scratch.push((lhs <= rhs) as i32),
+                                Tok::GT => scratch.push((lhs > rhs) as i32),
+                                Tok::GTE => scratch.push((lhs >= rhs) as i32),
+                                Tok::EQ => scratch.push((lhs == rhs) as i32),
+                                Tok::NEQ => scratch.push((lhs != rhs) as i32),
+                                Tok::AMP => scratch.push(lhs & rhs),
+                                Tok::PIPE => scratch.push(lhs | rhs),
+                                Tok::CARET => scratch.push(lhs ^ rhs),
+                                Tok::AND => scratch.push(((lhs != 0) && (rhs != 0)) as i32),
+                                Tok::OR => scratch.push(((lhs != 0) || (rhs != 0)) as i32),
+                                _ => unreachable!(),
+                            }
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+            }
+        }
+        scratch.last().copied()
+    }
 }
 
 struct Memory<'a> {
     name: &'a str,
     pc: u32,
+    len: u32,
 }
 
 impl<'a> Memory<'a> {
-    fn new(name: &'a str, pc: u32) -> Self {
-        Self { name, pc }
+    fn new(name: &'a str, pc: u32, len: u32) -> Self {
+        Self { name, pc, len }
     }
 }
 

@@ -163,7 +163,7 @@ pub enum ExprNode<'a> {
 #[derive(Debug)]
 pub struct Reloc<'a> {
     pub offset: usize,
-    pub width: usize,
+    pub width: u8,
     pub expr: Expr<'a>,
 }
 

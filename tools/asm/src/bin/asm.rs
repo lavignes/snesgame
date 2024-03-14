@@ -21,10 +21,6 @@ struct Args {
     #[arg(short, long)]
     output: Option<PathBuf>,
 
-    /// Symbol file
-    #[arg(short, long)]
-    sym: Option<PathBuf>,
-
     /// Pre-defined symbols (repeatable)
     #[arg(short = 'D', long, value_name="KEY1=val", value_parser = parse_defines::<String, i32>)]
     define: Vec<(String, i32)>,
@@ -870,12 +866,12 @@ impl<'a> Asm<'a> {
         Ok(())
     }
 
-    fn reloc(&mut self, offset: usize, width: u32, expr: Expr<'a>) {
+    fn reloc(&mut self, offset: usize, width: u8, expr: Expr<'a>) {
         let pc = self.pc() as usize;
         let offset = pc + offset;
         self.sections[self.section].relocs.push(Reloc {
             offset,
-            width: width as usize,
+            width,
             expr,
         });
     }
@@ -920,7 +916,7 @@ impl<'a> Asm<'a> {
                     }
                 }
             }
-            return self.add_pc(1 + width);
+            return self.add_pc(1 + (width as u32));
         }
         // DP instructions
         if self.peek()? == Tok::ASP {
