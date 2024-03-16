@@ -43,6 +43,6 @@ hi def link pasmLocalLabel    Function
 hi def link pasmTodo          Todo
 
 let b:current_syntax = "pasm"
-set ts=8
-set sw=8
-set noet
+set ts=4
+set sw=4
+set et

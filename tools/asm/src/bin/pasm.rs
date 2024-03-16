@@ -8,10 +8,10 @@ use std::{
     str::FromStr,
 };
 
-use asm::{
+use clap::Parser;
+use pasm::{
     Expr, ExprNode, Label, Op, Pos, Reloc, RelocVal, Section, SliceInterner, StrInterner, Sym, Tok,
 };
-use clap::Parser;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]

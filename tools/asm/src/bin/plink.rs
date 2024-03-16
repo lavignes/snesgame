@@ -1,3 +1,4 @@
+#![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 
 use std::{
@@ -11,10 +12,10 @@ use std::{
     str::FromStr,
 };
 
-use asm::{
+use clap::Parser;
+use pasm::{
     Expr, ExprNode, Label, Op, Pos, Reloc, RelocVal, Section, SliceInterner, StrInterner, Sym, Tok,
 };
-use clap::Parser;
 use serde::{de, Deserialize, Deserializer};
 use serde_derive::{Deserialize, Serialize};
 
@@ -32,9 +33,9 @@ struct Args {
     #[arg(short, long)]
     output: Option<PathBuf>,
 
-    /// Output file for debug symbols
-    #[arg(short = 'g', long)]
-    debug_file: Option<PathBuf>,
+    /// Output file for Mesen debug symbols
+    #[arg(long = "gMLB")]
+    debug_mesen: Option<PathBuf>,
 
     /// Pre-defined symbols (repeatable)
     #[arg(short = 'D', long, value_name="KEY1=val", value_parser = parse_defines::<String, i32>)]
@@ -176,6 +177,9 @@ fn main_real() -> Result<(), Box<dyn Error>> {
     }
     eprintln!("ok");
 
+    // TODO as a quick hack we store all symbols for addresses for generating debug
+    //   info later...
+    let mut debug_addrs = HashMap::new();
     for pass in 1..=2 {
         eprint!("symbol pass{pass}: ");
         for i in 0..ld.syms.len() {
@@ -183,7 +187,9 @@ fn main_real() -> Result<(), Box<dyn Error>> {
                 Expr::Const(value) => Expr::Const(value),
                 Expr::Addr(section, pc) => {
                     let section = ld.sections.iter().find(|sec| sec.name == section).unwrap();
-                    Expr::Const((pc + section.pc) as i32)
+                    let value = pc + section.pc;
+                    debug_addrs.insert(ld.syms[i].label.to_string(), value);
+                    Expr::Const(value as i32)
                 }
                 Expr::List(expr) => {
                     if let Some(value) = ld.expr_eval(expr) {
@@ -284,10 +290,22 @@ fn main_real() -> Result<(), Box<dyn Error>> {
     eprintln!("ok");
 
     eprint!("writing: ");
-    for section in ld.sections {
+    for section in &ld.sections {
         output.write_all(&section.data)?;
     }
     eprintln!("ok");
+
+    if let Some(path) = args.debug_mesen {
+        let mut file = File::options()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(path)
+            .map_err(|e| format!("cant open file: {e}"))?;
+        for (name, value) in debug_addrs {
+            writeln!(file, "PRG:{value:X}:{name}")?;
+        }
+    }
 
     Ok(())
 }
