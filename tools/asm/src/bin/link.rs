@@ -11,7 +11,9 @@ use std::{
     str::FromStr,
 };
 
-use asm::{Expr, ExprNode, Label, Op, Pos, Reloc, Section, SliceInterner, StrInterner, Sym, Tok};
+use asm::{
+    Expr, ExprNode, Label, Op, Pos, Reloc, RelocVal, Section, SliceInterner, StrInterner, Sym, Tok,
+};
 use clap::Parser;
 use serde::{de, Deserialize, Deserializer};
 use serde_derive::{Deserialize, Serialize};
@@ -29,6 +31,10 @@ struct Args {
     /// Output file (default: stdout)
     #[arg(short, long)]
     output: Option<PathBuf>,
+
+    /// Output file for debug symbols
+    #[arg(short = 'g', long)]
+    debug_file: Option<PathBuf>,
 
     /// Pre-defined symbols (repeatable)
     #[arg(short = 'D', long, value_name="KEY1=val", value_parser = parse_defines::<String, i32>)]
@@ -78,7 +84,18 @@ fn main_real() -> Result<(), Box<dyn Error>> {
 
     let mut ld = Ld::new();
 
-    // TODO fill in passed symbol args
+    let def_file = ld.str_int.intern("__DEFINES__");
+    let def_unit = ld.str_int.intern("__STATIC__");
+    for (name, val) in &args.define {
+        let string = ld.str_int.intern(name);
+        ld.syms.push(Sym::new(
+            Label::new(None, string),
+            Expr::Const(*val),
+            def_unit,
+            def_file,
+            Pos(0, 0),
+        ));
+    }
 
     for (name, mem) in &config.memories {
         let name = ld.str_int.intern(&name);
@@ -87,11 +104,33 @@ fn main_real() -> Result<(), Box<dyn Error>> {
 
     for (name, section) in &config.sections {
         let name = ld.str_int.intern(&name);
-        if let Some(_) = config.memories.get(&section.load) {
+        if let Some(memory) = config.memories.get(&section.load) {
             ld.sections.push(Section::new(name));
-            // TODO check for valid memory type combinations
+            match memory.ty {
+                MemoryType::RO => match &section.ty {
+                    SectionType::RO => {}
+                    _ => {
+                        Err(ld.err(&format!(
+                            "memory \"{}\" is not type-compatible with section \"{name}\"",
+                            section.load
+                        )))?;
+                    }
+                },
+                MemoryType::RW => match &section.ty {
+                    SectionType::RW | SectionType::BSS => {}
+                    _ => {
+                        Err(ld.err(&format!(
+                            "memory \"{}\" is not type-compatible with section \"{name}\"",
+                            section.load
+                        )))?;
+                    }
+                },
+            }
         } else {
-            Err(ld.err(&format!("memory {} is not defined in config", section.load)))?;
+            Err(ld.err(&format!(
+                "memory \"{}\" is not defined in config",
+                section.load
+            )))?;
         }
     }
 
@@ -124,17 +163,20 @@ fn main_real() -> Result<(), Box<dyn Error>> {
         // we update the section pc to be its absolute start address in memory
         section.pc = memory.pc;
         memory.pc += section.data.len() as u32;
-        if memory.pc > memory.len {
+        if memory.pc >= memory.end {
             Err(io::Error::new(
                 ErrorKind::InvalidData,
-                format!("no room left in memory {} for section {name}", memory.name),
+                format!(
+                    "no room left in memory \"{}\" for section \"{name}\"",
+                    memory.name
+                ),
             ))?;
         }
         eprint!(".");
     }
     eprintln!("ok");
 
-    for pass in 0..1 {
+    for pass in 1..=2 {
         eprint!("symbol pass{pass}: ");
         for i in 0..ld.syms.len() {
             let value = match ld.syms[i].value {
@@ -156,21 +198,86 @@ fn main_real() -> Result<(), Box<dyn Error>> {
         eprintln!("ok");
     }
 
-    // TODO assert no more undefined symbols in a loop
+    eprint!("symbol pass3: ");
+    for sym in &ld.syms {
+        if let Expr::Const(_) = sym.value {
+            continue;
+        }
+        Err(ld.err_in(
+            sym.unit,
+            &format!(
+                "undefined symbol \"{}\"\n\tdeclared at {}:{}:{}",
+                sym.label, sym.file, sym.pos.0, sym.pos.1
+            ),
+        ))?;
+    }
+    eprintln!("ok");
 
     eprint!("linking: ");
     for i in 0..ld.sections.len() {
-        for reloc in &ld.sections[i].relocs {
-            let value = match reloc.expr {
-                Expr::Const(value) => value,
-                Expr::Addr(section, pc) => {
+        for j in 0..ld.sections[i].relocs.len() {
+            let reloc = ld.sections[i].relocs[j];
+            let value = match reloc.value {
+                RelocVal::Addr(section, pc) => {
                     let section = ld.sections.iter().find(|sec| sec.name == section).unwrap();
                     (pc + section.pc) as i32
                 }
-                Expr::List(expr) => ld.expr_eval(expr).unwrap(),
+                RelocVal::List(expr) => {
+                    if let Some(value) = ld.expr_eval(expr) {
+                        value
+                    } else {
+                        Err(ld.err_in(
+                            reloc.unit,
+                            &format!(
+                                "expression cannot be solved\n\tdefined at {}:{}:{}",
+                                reloc.file, reloc.pos.0, reloc.pos.1
+                            ),
+                        ))?
+                    }
+                }
             };
-            // TODO width check
-            ld.sections[i].data[reloc.offset] = value as u8;
+            match reloc.width {
+                1 => {
+                    if (value as u32) > (u8::MAX as u32) {
+                        Err(ld.err_in(
+                            reloc.unit,
+                            &format!(
+                                "expression >1 byte\n\tdefined at {}:{}:{}",
+                                reloc.file, reloc.pos.0, reloc.pos.1
+                            ),
+                        ))?;
+                    }
+                    ld.sections[i].data[reloc.offset] = value as u8;
+                }
+                2 => {
+                    if (value as u32) > (u16::MAX as u32) {
+                        Err(ld.err_in(
+                            reloc.unit,
+                            &format!(
+                                "expression >2 bytes\n\tdefined at {}:{}:{}",
+                                reloc.file, reloc.pos.0, reloc.pos.1
+                            ),
+                        ))?;
+                    }
+                    ld.sections[i].data[reloc.offset] = ((value as u32) >> 0) as u8;
+                    ld.sections[i].data[reloc.offset + 1] = ((value as u32) >> 8) as u8;
+                }
+                3 => {
+                    if (value as u32) > 0x00FFFFFFu32 {
+                        Err(ld.err_in(
+                            reloc.unit,
+                            &format!(
+                                "expression >3 bytes\n\tdefined at {}:{}:{}",
+                                reloc.file, reloc.pos.0, reloc.pos.1
+                            ),
+                        ))?;
+                    }
+                    ld.sections[i].data[reloc.offset] = ((value as u32) >> 0) as u8;
+                    ld.sections[i].data[reloc.offset + 1] = ((value as u32) >> 8) as u8;
+                    ld.sections[i].data[reloc.offset + 2] = ((value as u32) >> 16) as u8;
+                }
+                _ => unreachable!(),
+            }
         }
         eprint!(".");
     }
@@ -340,8 +447,10 @@ impl<'a> Ld<'a> {
                     {
                         pc + section.pc
                     } else {
-                        return Err(self
-                            .err_in(file, &format!("section {section} is not defined in config")));
+                        return Err(self.err_in(
+                            file,
+                            &format!("section \"{section}\" is not defined in config"),
+                        ));
                     };
                     Expr::Addr(section, pc)
                 }
@@ -376,7 +485,7 @@ impl<'a> Ld<'a> {
                 .iter()
                 .find(|sym| (sym.label == label) && (sym.unit == unit))
             {
-                return Err(self.err_in(file, &format!("duplicate exported symbol {label} found\n\tdefined at {}:{}:{}\n\tagain at {sym_file}:{line}:{column}", other.file, other.pos.0, other.pos.1)));
+                return Err(self.err_in(file, &format!("duplicate exported symbol \"{label}\" found\n\tdefined at {}:{}:{}\n\tagain at {sym_file}:{line}:{column}", other.file, other.pos.0, other.pos.1)));
             }
             self.syms.push(Sym::new(label, value, unit, sym_file, pos));
         }
@@ -390,7 +499,10 @@ impl<'a> Ld<'a> {
             let section = if let Some(section) = self.sections.iter().find(|sec| sec.name == name) {
                 section
             } else {
-                return Err(self.err_in(file, &format!("section {name} is not defined in config")));
+                return Err(self.err_in(
+                    file,
+                    &format!("section \"{name}\" is not defined in config"),
+                ));
             };
             let data_len: usize = self.read_int(&mut reader)?;
             let mut data = Vec::new();
@@ -405,12 +517,8 @@ impl<'a> Ld<'a> {
                 let offset = offset + (section.pc as usize);
                 let width: u8 = self.read_int(&mut reader)?;
                 let ty: u8 = self.read_int(&mut reader)?;
-                let expr = match ty {
+                let value = match ty {
                     0 => {
-                        let value: i32 = self.read_int(&mut reader)?;
-                        Expr::Const(value)
-                    }
-                    1 => {
                         let index: usize = self.read_int(&mut reader)?;
                         let len: usize = self.read_int(&mut reader)?;
                         let section = str_int.slice(index..(index + len)).unwrap();
@@ -424,24 +532,42 @@ impl<'a> Ld<'a> {
                         } else {
                             return Err(self.err_in(
                                 file,
-                                &format!("section {section} is not defined in config"),
+                                &format!("section \"{section}\" is not defined in config"),
                             ));
                         };
-                        Expr::Addr(section, pc)
+                        RelocVal::Addr(section, pc)
                     }
-                    2 => {
+                    1 => {
                         let index: usize = self.read_int(&mut reader)?;
                         let len: usize = self.read_int(&mut reader)?;
                         let expr = expr_int.slice(index..(index + len)).unwrap();
                         let expr = self.expr_int.intern(expr);
-                        Expr::List(expr)
+                        RelocVal::List(expr)
                     }
                     _ => return Err(self.err_in(file, "malformed relocation table")),
                 };
+                let index: usize = self.read_int(&mut reader)?;
+                let len: usize = self.read_int(&mut reader)?;
+                let unit = str_int.slice(index..(index + len)).unwrap();
+                let index: usize = self.read_int(&mut reader)?;
+                let len: usize = self.read_int(&mut reader)?;
+                let reloc_file = str_int.slice(index..(index + len)).unwrap();
+                let unit = if unit == "__STATIC__" {
+                    self.str_int.intern(file)
+                } else {
+                    self.str_int.intern(unit)
+                };
+                let reloc_file = self.str_int.intern(reloc_file);
+                let line: usize = self.read_int(&mut reader)?;
+                let column: usize = self.read_int(&mut reader)?;
+                let pos = Pos(line, column);
                 relocs.push(Reloc {
                     offset,
                     width,
-                    expr,
+                    value,
+                    unit,
+                    file: reloc_file,
+                    pos,
                 });
             }
             // extend section
@@ -450,7 +576,10 @@ impl<'a> Ld<'a> {
                 section.relocs.extend(relocs);
                 section.pc += data.len() as u32;
             } else {
-                return Err(self.err_in(file, &format!("section {name} is not defined in config")));
+                return Err(self.err_in(
+                    file,
+                    &format!("section \"{name}\" is not defined in config"),
+                ));
             };
         }
 
@@ -463,7 +592,7 @@ impl<'a> Ld<'a> {
             match *node {
                 ExprNode::Const(value) => scratch.push(value),
                 ExprNode::Label(label) => {
-                    let sym = self.syms.iter().find(|sym| sym.label == label).unwrap();
+                    let sym = self.syms.iter().find(|sym| sym.label == label)?;
                     match sym.value {
                         Expr::Const(value) => scratch.push(value),
                         Expr::Addr(section, pc) => {
@@ -476,11 +605,7 @@ impl<'a> Ld<'a> {
                         }
                         // expand the sub-expression recursively
                         Expr::List(expr) => {
-                            if let Some(value) = self.expr_eval(expr) {
-                                scratch.push(value);
-                            } else {
-                                return None;
-                            }
+                            scratch.push(self.expr_eval(expr)?);
                         }
                     }
                 }
@@ -535,12 +660,16 @@ impl<'a> Ld<'a> {
 struct Memory<'a> {
     name: &'a str,
     pc: u32,
-    len: u32,
+    end: u32,
 }
 
 impl<'a> Memory<'a> {
     fn new(name: &'a str, pc: u32, len: u32) -> Self {
-        Self { name, pc, len }
+        Self {
+            name,
+            pc,
+            end: pc + len,
+        }
     }
 }
 
@@ -569,7 +698,6 @@ enum SectionType {
     RO,
     RW,
     BSS,
-    ZP,
 }
 
 #[derive(Serialize, Deserialize)]

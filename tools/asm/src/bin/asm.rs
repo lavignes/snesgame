@@ -8,7 +8,9 @@ use std::{
     str::FromStr,
 };
 
-use asm::{Expr, ExprNode, Label, Op, Pos, Reloc, Section, SliceInterner, StrInterner, Sym, Tok};
+use asm::{
+    Expr, ExprNode, Label, Op, Pos, Reloc, RelocVal, Section, SliceInterner, StrInterner, Sym, Tok,
+};
 use clap::Parser;
 
 #[derive(Parser)]
@@ -196,25 +198,29 @@ fn main_real() -> Result<(), Box<dyn Error>> {
         for reloc in section.relocs {
             output.write_all(&reloc.offset.to_le_bytes())?;
             output.write_all(&reloc.width.to_le_bytes())?;
-            match reloc.expr {
-                Expr::Const(value) => {
+            match reloc.value {
+                RelocVal::Addr(section, pc) => {
                     output.write_all(&[0])?;
-                    output.write_all(&value.to_le_bytes())?;
-                }
-                Expr::Addr(section, pc) => {
-                    output.write_all(&[1])?;
                     let index = asm.str_int.offset(section).unwrap();
                     output.write_all(&index.to_le_bytes())?;
                     output.write_all(&section.len().to_le_bytes())?;
                     output.write_all(&pc.to_le_bytes())?;
                 }
-                Expr::List(expr) => {
-                    output.write_all(&[2])?;
+                RelocVal::List(expr) => {
+                    output.write_all(&[1])?;
                     let index = asm.expr_int.offset(expr).unwrap();
                     output.write_all(&index.to_le_bytes())?;
                     output.write_all(&expr.len().to_le_bytes())?;
                 }
             }
+            let index = asm.str_int.offset(reloc.unit).unwrap();
+            output.write_all(&index.to_le_bytes())?;
+            output.write_all(&reloc.unit.len().to_le_bytes())?;
+            let index = asm.str_int.offset(reloc.file).unwrap();
+            output.write_all(&index.to_le_bytes())?;
+            output.write_all(&reloc.file.len().to_le_bytes())?;
+            output.write_all(&reloc.pos.0.to_le_bytes())?;
+            output.write_all(&reloc.pos.1.to_le_bytes())?;
         }
     }
     eprintln!("ok");
@@ -417,8 +423,13 @@ impl<'a> Asm<'a> {
                         // save in the symbol table with temporary value
                         let index = self.syms.len();
                         let unit = self.str_int.intern("__STATIC__");
-                        self.syms
-                            .push(Sym::new(label, Expr::Const(0), unit, self.tok().file(), pos));
+                        self.syms.push(Sym::new(
+                            label,
+                            Expr::Const(0),
+                            unit,
+                            self.tok().file(),
+                            pos,
+                        ));
                         index
                     };
                     // check if this label is being defined to a value
@@ -583,7 +594,7 @@ impl<'a> Asm<'a> {
     }
 
     fn range_24(&self, value: i32) -> io::Result<u32> {
-        if (value as u32) > 0x007FFFFFu32 {
+        if (value as u32) > 0x00FFFFFFu32 {
             return Err(self.err("expression >3 bytes"));
         }
         Ok(value as u32)
@@ -781,11 +792,7 @@ impl<'a> Asm<'a> {
                             }
                             // expand the sub-expression recursively
                             Expr::List(expr) => {
-                                if let Some(value) = self.expr_branch_eval(expr, branch) {
-                                    scratch.push(value);
-                                } else {
-                                    return None;
-                                }
+                                scratch.push(self.expr_branch_eval(expr, branch)?);
                             }
                         }
                     } else {
@@ -866,13 +873,23 @@ impl<'a> Asm<'a> {
         Ok(())
     }
 
-    fn reloc(&mut self, offset: usize, width: u8, expr: Expr<'a>) {
+    fn reloc(&mut self, offset: usize, width: u8, expr: Expr<'a>, pos: Pos) {
         let pc = self.pc() as usize;
         let offset = pc + offset;
+        let value = match expr {
+            Expr::Const(_) => unreachable!(),
+            Expr::Addr(section, pc) => RelocVal::Addr(section, pc),
+            Expr::List(expr) => RelocVal::List(expr),
+        };
+        let unit = self.str_int.intern("__STATIC__");
+        let file = self.tok().file();
         self.sections[self.section].relocs.push(Reloc {
             offset,
             width,
-            expr,
+            value,
+            unit,
+            file,
+            pos,
         });
     }
 
@@ -885,8 +902,6 @@ impl<'a> Asm<'a> {
             return self.add_pc(1);
         }
         if self.peek()? == Tok::HASH {
-            // TODO I hate checking the mnemonic
-            // could use a table instead
             #[rustfmt::skip]
                 let width = match mne.0 {
                     Mne::ADC | Mne::AND | Mne::BIT | Mne::CMP | Mne::EOR | Mne::ORA | Mne::LDA | Mne::SBC
@@ -897,6 +912,7 @@ impl<'a> Asm<'a> {
                 };
             let op = self.check_opcode(mne.1, Addr::IMM)?;
             self.eat();
+            let pos = self.tok().pos();
             let expr = self.expr()?;
             if self.emit {
                 self.write(&[op]);
@@ -905,14 +921,14 @@ impl<'a> Asm<'a> {
                         self.write(&self.range_8(value)?.to_le_bytes());
                     } else {
                         self.write(&[0x42]);
-                        self.reloc(1, width, expr);
+                        self.reloc(1, width, expr, pos);
                     }
                 } else {
                     if let Ok(value) = self.const_expr(expr) {
                         self.write(&self.range_16(value)?.to_le_bytes());
                     } else {
                         self.write(&[0x42, 0x42]);
-                        self.reloc(1, width, expr);
+                        self.reloc(1, width, expr, pos);
                     }
                 }
             }
@@ -924,6 +940,7 @@ impl<'a> Asm<'a> {
             // IDP, IDX, or IDY
             if self.peek()? == Tok::LPAREN {
                 self.eat();
+                let pos = self.tok().pos();
                 let expr = self.expr()?;
                 let op = if self.peek()? == Tok::COMMA {
                     let op = self.check_opcode(mne.1, Addr::IDX)?;
@@ -948,7 +965,7 @@ impl<'a> Asm<'a> {
                         self.write(&self.range_16(value)?.to_le_bytes());
                     } else {
                         self.write(&[0x42, 0x42]);
-                        self.reloc(1, 2, expr);
+                        self.reloc(1, 2, expr, pos);
                     }
                 }
                 return self.add_pc(3);
@@ -956,6 +973,7 @@ impl<'a> Asm<'a> {
             // IDL or ILY
             if self.peek()? == Tok::LBRACK {
                 self.eat();
+                let pos = self.tok().pos();
                 let expr = self.expr()?;
                 self.expect(Tok::RBRACK)?;
                 let op = if self.peek()? == Tok::COMMA {
@@ -972,12 +990,13 @@ impl<'a> Asm<'a> {
                         self.write(&self.range_16(value)?.to_le_bytes());
                     } else {
                         self.write(&[0x42, 0x42]);
-                        self.reloc(1, 2, expr);
+                        self.reloc(1, 2, expr, pos);
                     }
                 }
                 return self.add_pc(3);
             }
             // DP, DPX, or DPY
+            let pos = self.tok().pos();
             let expr = self.expr()?;
             let op = if self.peek()? == Tok::COMMA {
                 self.eat();
@@ -999,7 +1018,7 @@ impl<'a> Asm<'a> {
                     self.write(&self.range_16(value)?.to_le_bytes());
                 } else {
                     self.write(&[0x42, 0x42]);
-                    self.reloc(1, 2, expr);
+                    self.reloc(1, 2, expr, pos);
                 }
             }
             return self.add_pc(3);
@@ -1007,6 +1026,7 @@ impl<'a> Asm<'a> {
         // ABL or ALX
         if self.peek()? == Tok::PIPE {
             self.eat();
+            let pos = self.tok().pos();
             let expr = self.expr()?;
             let op = if self.peek()? == Tok::COMMA {
                 let op = self.check_opcode(mne.1, Addr::ALX)?;
@@ -1022,13 +1042,14 @@ impl<'a> Asm<'a> {
                     self.write(&self.range_24(value)?.to_le_bytes());
                 } else {
                     self.write(&[0x42, 0x42, 0x42]);
-                    self.reloc(1, 3, expr);
+                    self.reloc(1, 3, expr, pos);
                 }
             }
             return self.add_pc(4);
         }
         // ISY, IAB, or IAX
         if self.peek()? == Tok::LPAREN {
+            let pos = self.tok().pos();
             let expr = self.expr()?;
             // ISY
             if let Some(op) = self.find_opcode(mne.1, Addr::ISY) {
@@ -1041,7 +1062,7 @@ impl<'a> Asm<'a> {
                         self.write(&self.range_8(value)?.to_le_bytes());
                     } else {
                         self.write(&[0x42]);
-                        self.reloc(1, 1, expr);
+                        self.reloc(1, 1, expr, pos);
                     }
                 }
                 return self.add_pc(2);
@@ -1061,7 +1082,7 @@ impl<'a> Asm<'a> {
                     self.write(&self.range_16(value)?.to_le_bytes());
                 } else {
                     self.write(&[0x42, 0x42]);
-                    self.reloc(1, 2, expr);
+                    self.reloc(1, 2, expr, pos);
                 }
             }
             return self.add_pc(3);
@@ -1070,6 +1091,7 @@ impl<'a> Asm<'a> {
         if self.peek()? == Tok::LBRACK {
             let op = self.check_opcode(mne.1, Addr::IAL)?;
             self.eat();
+            let pos = self.tok().pos();
             let expr = self.expr()?;
             if self.emit {
                 self.write(&[op]);
@@ -1077,7 +1099,7 @@ impl<'a> Asm<'a> {
                     self.write(&self.range_16(value)?.to_le_bytes());
                 } else {
                     self.write(&[0x42, 0x42]);
-                    self.reloc(1, 2, expr);
+                    self.reloc(1, 2, expr, pos);
                 }
             }
             return self.add_pc(3);
@@ -1117,18 +1139,30 @@ impl<'a> Asm<'a> {
         // BM
         if let Some(op) = self.find_opcode(mne.1, Addr::BM) {
             self.check_opcode(mne.1, Addr::BM)?;
+            let src_pos = self.tok().pos();
             let src = self.expr()?;
             self.expect(Tok::COMMA)?;
+            let dst_pos = self.tok().pos();
             let dst = self.expr()?;
             if self.emit {
                 self.write(&[op]);
-                todo!()
-                //self.write(&self.const_8(src)?.to_le_bytes())?;
-                //self.write(&self.const_8(dst)?.to_le_bytes())?;
+                if let Ok(value) = self.const_expr(src) {
+                    self.write(&self.range_8(value)?.to_le_bytes());
+                } else {
+                    self.write(&[0x42]);
+                    self.reloc(1, 1, src, src_pos);
+                }
+                if let Ok(value) = self.const_expr(dst) {
+                    self.write(&self.range_8(value)?.to_le_bytes());
+                } else {
+                    self.write(&[0x42]);
+                    self.reloc(1, 1, src, dst_pos);
+                }
             }
             return self.add_pc(3);
         }
         // SR, ABS, ABX, or ABY
+        let pos = self.tok().pos();
         let expr = self.expr()?;
         // SR, ABX, or ABY
         if self.peek()? == Tok::COMMA {
@@ -1143,7 +1177,7 @@ impl<'a> Asm<'a> {
                         self.write(&self.range_8(value)?.to_le_bytes());
                     } else {
                         self.write(&[0x42]);
-                        self.reloc(1, 1, expr);
+                        self.reloc(1, 1, expr, pos);
                     }
                 }
                 return self.add_pc(2);
@@ -1164,7 +1198,7 @@ impl<'a> Asm<'a> {
                     self.write(&self.range_16(value)?.to_le_bytes());
                 } else {
                     self.write(&[0x42, 0x42]);
-                    self.reloc(1, 2, expr);
+                    self.reloc(1, 2, expr, pos);
                 }
             }
             return self.add_pc(3);
@@ -1177,7 +1211,7 @@ impl<'a> Asm<'a> {
                 self.write(&self.range_16(value)?.to_le_bytes());
             } else {
                 self.write(&[0x42, 0x42]);
-                self.reloc(1, 2, expr);
+                self.reloc(1, 2, expr, pos);
             }
         }
         self.add_pc(3)
@@ -1194,13 +1228,14 @@ impl<'a> Asm<'a> {
                     self.add_pc(self.str().len() as u32)?;
                     self.eat();
                 } else {
+                    let pos = self.tok().pos();
                     let expr = self.expr()?;
                     if self.emit {
                         if let Ok(value) = self.const_expr(expr) {
                             self.write(&self.range_8(value)?.to_le_bytes());
                         } else {
                             self.write(&[0x42]);
-                            self.reloc(0, 1, expr);
+                            self.reloc(0, 1, expr, pos);
                         }
                     }
                     self.add_pc(1)?;
@@ -1212,13 +1247,14 @@ impl<'a> Asm<'a> {
             },
             Dir::WORD => loop {
                 self.eat();
+                let pos = self.tok().pos();
                 let expr = self.expr()?;
                 if self.emit {
                     if let Ok(value) = self.const_expr(expr) {
                         self.write(&self.range_16(value)?.to_le_bytes());
                     } else {
                         self.write(&[0x42, 0x42]);
-                        self.reloc(0, 2, expr);
+                        self.reloc(0, 2, expr, pos);
                     }
                 }
                 self.add_pc(2)?;
