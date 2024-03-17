@@ -12,6 +12,7 @@ use clap::Parser;
 use pasm::{
     Expr, ExprNode, Label, Op, Pos, Reloc, RelocVal, Section, SliceInterner, StrInterner, Sym, Tok,
 };
+use tracing::Level;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -26,6 +27,10 @@ struct Args {
     /// Pre-defined symbols (repeatable)
     #[arg(short = 'D', long, value_name="KEY1=val", value_parser = parse_defines::<String, i32>)]
     define: Vec<(String, i32)>,
+
+    /// One of `TRACE`, `DEBUG`, `INFO`, `WARN`, or `ERROR`
+    #[arg(short, long, default_value_t = Level::INFO)]
+    log_level: Level,
 }
 
 fn parse_defines<T, U>(s: &str) -> Result<(T, U), Box<dyn Error + Send + Sync + 'static>>
@@ -42,31 +47,25 @@ where
 }
 
 fn main() -> ExitCode {
-    if let Err(e) = main_real() {
-        eprintln!("{e}");
+    let args = Args::parse();
+    tracing_subscriber::fmt()
+        .with_max_level(args.log_level)
+        .with_writer(io::stderr)
+        .init();
+
+    if let Err(e) = main_real(args) {
+        tracing::error!("{e}");
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS
     }
 }
 
-fn main_real() -> Result<(), Box<dyn Error>> {
-    let args = Args::parse();
+fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
     let input = fs::canonicalize(args.source)?;
     let input = input.to_str().unwrap();
     let file = File::open(input).map_err(|e| format!("cant open file: {e}"))?;
     let lexer = Lexer::new(file, input);
-    let mut output: Box<dyn Write> = match args.output {
-        Some(path) => Box::new(
-            File::options()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open(path)
-                .map_err(|e| format!("cant open file: {e}"))?,
-        ),
-        None => Box::new(io::stdout()),
-    };
 
     let mut asm = Asm::new(lexer);
     asm.str_int.intern(input); // dont forget to intern the input name
@@ -83,16 +82,26 @@ fn main_real() -> Result<(), Box<dyn Error>> {
         ));
     }
 
-    eprint!("pass1: ");
+    tracing::trace!("starting pass 1");
     asm.pass()?;
-    eprintln!("ok");
 
-    eprint!("pass2: ");
+    tracing::trace!("starting pass 2");
     asm.rewind()?;
     asm.pass()?;
-    eprintln!("ok");
 
-    eprint!("writing: ");
+    let mut output: Box<dyn Write> = match args.output {
+        Some(path) => Box::new(
+            File::options()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(path)
+                .map_err(|e| format!("cant open file: {e}"))?,
+        ),
+        None => Box::new(io::stdout()),
+    };
+
+    tracing::trace!("writing");
     output.write_all("pasm01".as_bytes())?;
     let len = asm
         .str_int
@@ -187,8 +196,18 @@ fn main_real() -> Result<(), Box<dyn Error>> {
         output.write_all(&sym.pos.0.to_le_bytes())?;
         output.write_all(&sym.pos.1.to_le_bytes())?;
     }
-    output.write_all(&asm.sections.len().to_le_bytes())?;
+    // filter out empty sections
+    output.write_all(
+        &asm.sections
+            .iter()
+            .filter(|section| section.data.is_empty())
+            .count()
+            .to_le_bytes(),
+    )?;
     for section in asm.sections {
+        if section.data.is_empty() {
+            continue;
+        }
         let index = asm.str_int.offset(section.name).unwrap();
         output.write_all(&index.to_le_bytes())?;
         output.write_all(&section.name.len().to_le_bytes())?;
@@ -223,11 +242,9 @@ fn main_real() -> Result<(), Box<dyn Error>> {
             output.write_all(&reloc.pos.1.to_le_bytes())?;
         }
     }
-    eprintln!("ok");
 
-    eprintln!("== stats ==");
-    eprintln!("symbols: {}", asm.syms.len());
-    eprintln!(
+    tracing::debug!("symbols: {}", asm.syms.len());
+    tracing::debug!(
         "string heap: {}/{} bytes",
         asm.str_int
             .storages
@@ -238,14 +255,14 @@ fn main_real() -> Result<(), Box<dyn Error>> {
             .iter()
             .fold(0, |accum, storage| accum + storage.capacity())
     );
-    eprintln!(
+    tracing::debug!(
         "macro heap: {}/{} bytes",
         asm.tok_int.storages.iter().fold(0, |accum, storage| accum
             + (storage.len() * mem::size_of::<MacroTok>())),
         asm.tok_int.storages.iter().fold(0, |accum, storage| accum
             + (storage.capacity() * mem::size_of::<MacroTok>()))
     );
-    eprintln!(
+    tracing::debug!(
         "expr heap: {}/{} bytes",
         asm.expr_int.storages.iter().fold(0, |accum, storage| accum
             + (storage.len() * mem::size_of::<ExprNode>())),
@@ -280,7 +297,7 @@ struct Asm<'a> {
 impl<'a> Asm<'a> {
     fn new<R: Read + Seek + 'static>(lexer: Lexer<'a, R>) -> Self {
         let mut str_int = StrInterner::new();
-        let code = str_int.intern("CODE");
+        let code = str_int.intern("__CODE__");
         Self {
             toks: vec![Box::new(lexer)],
             str_int,
@@ -305,7 +322,7 @@ impl<'a> Asm<'a> {
 
     fn rewind(&mut self) -> io::Result<()> {
         self.toks.last_mut().unwrap().rewind()?;
-        self.sections = vec![Section::new(self.str_int.intern("CODE"))];
+        self.sections = vec![Section::new(self.str_int.intern("__CODE__"))];
         self.section = 0;
         self.native_mode = false;
         self.accum_16 = false;
@@ -328,7 +345,7 @@ impl<'a> Asm<'a> {
             // special case, setting the PC
             if self.peek()? == Tok::STAR {
                 self.eat();
-                if (self.peek()? != Tok::IDENT) && !self.str_like("EQU") {
+                if (self.peek()? != Tok::IDENT) && !self.str_like("@EQU") {
                     return Err(self.err("expected equ"));
                 }
                 self.eat();
@@ -344,8 +361,8 @@ impl<'a> Asm<'a> {
                 // is this a label?
                 if mne.is_none()
                     && dir.is_none()
-                    && !self.str_like("EQU")
-                    && !self.str_like("MACRO")
+                    && !self.str_like("@EQU")
+                    && !self.str_like("@MACRO")
                 {
                     let file = self.tok().file();
                     let pos = self.tok().pos();
@@ -397,7 +414,7 @@ impl<'a> Asm<'a> {
                     }
 
                     // being defined to a macro?
-                    if (self.peek()? == Tok::IDENT) && self.str_like("MACRO") {
+                    if (self.peek()? == Tok::IDENT) && self.str_like("@MACRO") {
                         if label.string.starts_with(".") {
                             return Err(self.err("macro must be global"));
                         }
@@ -433,7 +450,7 @@ impl<'a> Asm<'a> {
                         index
                     };
                     // check if this label is being defined to a value
-                    if (self.peek()? == Tok::IDENT) && self.str_like("EQU") {
+                    if (self.peek()? == Tok::IDENT) && self.str_like("@EQU") {
                         self.eat();
                         let expr = self.expr()?;
                         // equ's must always be const, either on the first or second pass
@@ -686,8 +703,9 @@ impl<'a> Asm<'a> {
                     continue;
                 }
                 #[rustfmt::skip]
-                tok @ (Tok::PIPE | Tok::AND | Tok::OR | Tok::SOLIDUS | Tok::MODULUS | Tok::ASL
-                      | Tok::ASR | Tok::LSR | Tok::LTE | Tok::GTE | Tok::EQ | Tok::NEQ) => {
+                tok @ (Tok::AMP | Tok::PIPE | Tok::AND | Tok::OR | Tok::SOLIDUS | Tok::MODULUS
+                       | Tok::ASL | Tok::ASR | Tok::LSR | Tok::LTE | Tok::GTE | Tok::EQ | Tok::NEQ
+                      ) => {
                     if !seen_val {
                         return Err(self.err("expected value"));
                     }
@@ -756,7 +774,16 @@ impl<'a> Asm<'a> {
                     self.eat();
                     continue;
                 }
-                _ => break,
+                // TODO need to check if seen_val is true and if_level == 0
+                _ => {
+                    if !seen_val {
+                        return Err(self.err("expected value"));
+                    }
+                    if paren_depth != 0 {
+                        return Err(self.err("unbalanced parens"));
+                    }
+                    break;
+                }
             }
         }
         while let Some(top) = self.operator_buffer.pop() {
@@ -1361,7 +1388,7 @@ impl<'a> Asm<'a> {
                             if self.str_like(Dir::IF.0)
                                 || self.str_like(Dir::IFDEF.0)
                                 || self.str_like(Dir::IFNDEF.0)
-                                || self.str_like("MACRO")
+                                || self.str_like("@MACRO")
                             {
                                 if_level += 1;
                             } else if self.str_like(Dir::END.0) {
@@ -1422,7 +1449,7 @@ impl<'a> Asm<'a> {
                 if self.str_like(Dir::IF.0)
                     || self.str_like(Dir::IFDEF.0)
                     || self.str_like(Dir::IFNDEF.0)
-                    || self.str_like("MACRO")
+                    || self.str_like("@MACRO")
                 {
                     if_level += 1;
                 } else if self.str_like(Dir::END.0) {
@@ -1697,23 +1724,23 @@ const NATIVE_OPCODES: &[u8] = &[
 struct Dir(&'static str);
 
 impl Dir {
-    const BYTE: Self = Self("BYTE");
-    const WORD: Self = Self("WORD");
-    const SECTION: Self = Self("SECTION");
-    const EXPORT: Self = Self("EXPORT");
-    const PAD: Self = Self("PAD");
-    const ALIGN: Self = Self("ALIGN");
-    const INCLUDE: Self = Self("INCLUDE");
-    const IF: Self = Self("IF");
-    const IFDEF: Self = Self("IFDEF");
-    const IFNDEF: Self = Self("IFNDEF");
-    const END: Self = Self("END");
-    const INDEX8: Self = Self("INDEX8");
-    const INDEX16: Self = Self("INDEX16");
-    const ACCUM8: Self = Self("ACCUM8");
-    const ACCUM16: Self = Self("ACCUM16");
-    const EMULATE: Self = Self("EMULATE");
-    const NATIVE: Self = Self("NATIVE");
+    const BYTE: Self = Self("@BYTE");
+    const WORD: Self = Self("@WORD");
+    const SECTION: Self = Self("@SECTION");
+    const EXPORT: Self = Self("@EXPORT");
+    const PAD: Self = Self("@PAD");
+    const ALIGN: Self = Self("@ALIGN");
+    const INCLUDE: Self = Self("@INCLUDE");
+    const IF: Self = Self("@IF");
+    const IFDEF: Self = Self("@IFDEF");
+    const IFNDEF: Self = Self("@IFNDEF");
+    const END: Self = Self("@END");
+    const INDEX8: Self = Self("@INDEX8");
+    const INDEX16: Self = Self("@INDEX16");
+    const ACCUM8: Self = Self("@ACCUM8");
+    const ACCUM16: Self = Self("@ACCUM16");
+    const EMULATE: Self = Self("@EMULATE");
+    const NATIVE: Self = Self("@NATIVE");
 }
 
 const DIRECTIVES: &[Dir] = &[
@@ -1899,10 +1926,10 @@ impl<'a, R: Read + Seek> TokStream<'a> for Lexer<'a, R> {
                 }
                 Err(self.err("unexpected garbage"))
             }
-            // idents and single chars
+            // directives, idents, and single chars
             Some(c) => {
                 while let Some(c) = self.reader.peek()? {
-                    if !c.is_ascii_alphanumeric() && !b"_.".contains(&c) {
+                    if !c.is_ascii_alphanumeric() && !b"_.@".contains(&c) {
                         break;
                     }
                     self.reader.eat();

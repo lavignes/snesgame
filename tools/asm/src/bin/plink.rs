@@ -2,7 +2,7 @@
 #![feature(generic_const_exprs)]
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::HashMap,
     error::Error,
     fs::{self, File},
     io::{self, ErrorKind, Read, Write},
@@ -13,11 +13,13 @@ use std::{
 };
 
 use clap::Parser;
+use indexmap::IndexMap;
 use pasm::{
     Expr, ExprNode, Label, Op, Pos, Reloc, RelocVal, Section, SliceInterner, StrInterner, Sym, Tok,
 };
 use serde::{de, Deserialize, Deserializer};
 use serde_derive::{Deserialize, Serialize};
+use tracing::Level;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -40,6 +42,10 @@ struct Args {
     /// Pre-defined symbols (repeatable)
     #[arg(short = 'D', long, value_name="KEY1=val", value_parser = parse_defines::<String, i32>)]
     define: Vec<(String, i32)>,
+
+    /// One of `TRACE`, `DEBUG`, `INFO`, `WARN`, or `ERROR`
+    #[arg(short, long, default_value_t = Level::INFO)]
+    log_level: Level,
 }
 
 fn parse_defines<T, U>(s: &str) -> Result<(T, U), Box<dyn Error + Send + Sync + 'static>>
@@ -56,29 +62,22 @@ where
 }
 
 fn main() -> ExitCode {
-    if let Err(e) = main_real() {
-        eprintln!("{e}");
+    let args = Args::parse();
+    tracing_subscriber::fmt()
+        .with_max_level(args.log_level)
+        .with_writer(io::stderr)
+        .init();
+
+    if let Err(e) = main_real(args) {
+        tracing::error!("{e}");
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS
     }
 }
 
-fn main_real() -> Result<(), Box<dyn Error>> {
-    let args = Args::parse();
+fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
     let mut config = File::open(args.config).map_err(|e| format!("cant open file: {e}"))?;
-    let mut output: Box<dyn Write> = match args.output {
-        Some(path) => Box::new(
-            File::options()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open(path)
-                .map_err(|e| format!("cant open file: {e}"))?,
-        ),
-        None => Box::new(io::stdout()),
-    };
-
     let mut config_text = String::new();
     config.read_to_string(&mut config_text)?;
     let config: Script = toml::from_str(&config_text)?;
@@ -135,17 +134,15 @@ fn main_real() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    eprint!("loading: ");
+    tracing::trace!("loading objects");
     for object in args.objects {
         let path = fs::canonicalize(object)?;
         let path = path.to_str().unwrap();
         let file = File::open(path)?;
         ld.load(path, file)?;
-        eprint!(".");
     }
-    eprintln!("ok");
 
-    eprint!("relocating: ");
+    tracing::trace!("relocating sections");
     for (name, section) in &config.sections {
         let Ld {
             ref mut sections,
@@ -164,7 +161,7 @@ fn main_real() -> Result<(), Box<dyn Error>> {
         // we update the section pc to be its absolute start address in memory
         section.pc = memory.pc;
         memory.pc += section.data.len() as u32;
-        if memory.pc >= memory.end {
+        if memory.pc > memory.end {
             Err(io::Error::new(
                 ErrorKind::InvalidData,
                 format!(
@@ -173,15 +170,13 @@ fn main_real() -> Result<(), Box<dyn Error>> {
                 ),
             ))?;
         }
-        eprint!(".");
     }
-    eprintln!("ok");
 
     // TODO as a quick hack we store all symbols for addresses for generating debug
     //   info later...
     let mut debug_addrs = HashMap::new();
     for pass in 1..=2 {
-        eprint!("symbol pass{pass}: ");
+        tracing::trace!("symbol table pass {pass}");
         for i in 0..ld.syms.len() {
             let value = match ld.syms[i].value {
                 Expr::Const(value) => Expr::Const(value),
@@ -201,10 +196,9 @@ fn main_real() -> Result<(), Box<dyn Error>> {
             };
             ld.syms[i].value = value;
         }
-        eprintln!("ok");
     }
 
-    eprint!("symbol pass3: ");
+    tracing::trace!("symbol table validation");
     for sym in &ld.syms {
         if let Expr::Const(_) = sym.value {
             continue;
@@ -217,9 +211,8 @@ fn main_real() -> Result<(), Box<dyn Error>> {
             ),
         ))?;
     }
-    eprintln!("ok");
 
-    eprint!("linking: ");
+    tracing::trace!("linking");
     for i in 0..ld.sections.len() {
         for j in 0..ld.sections[i].relocs.len() {
             let reloc = ld.sections[i].relocs[j];
@@ -285,17 +278,39 @@ fn main_real() -> Result<(), Box<dyn Error>> {
                 _ => unreachable!(),
             }
         }
-        eprint!(".");
     }
-    eprintln!("ok");
 
-    eprint!("writing: ");
-    for section in &ld.sections {
-        output.write_all(&section.data)?;
+    let mut output: Box<dyn Write> = match args.output {
+        Some(path) => Box::new(
+            File::options()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(path)
+                .map_err(|e| format!("cant open file: {e}"))?,
+        ),
+        None => Box::new(io::stdout()),
+    };
+
+    tracing::trace!("writing");
+    for (mem_name, memory) in &config.memories {
+        for (sec_name, section) in &config.sections {
+            if &section.load != mem_name {
+                continue;
+            }
+            let section = &ld.sections.iter().find(|sec| sec.name == sec_name).unwrap();
+            output.write_all(&section.data)?;
+        }
+        if let Some(value) = memory.fill {
+            let mem = &ld.memories.iter().find(|mem| mem.name == mem_name).unwrap();
+            for _ in mem.pc..mem.end {
+                output.write(&[value])?;
+            }
+        }
     }
-    eprintln!("ok");
 
     if let Some(path) = args.debug_mesen {
+        tracing::trace!("writing mesen debug symbols");
         let mut file = File::options()
             .write(true)
             .create(true)
@@ -700,14 +715,17 @@ enum MemoryType {
 
 #[derive(Serialize, Deserialize)]
 struct ScriptMemory {
-    #[serde(deserialize_with = "deserialize_bases")]
+    #[serde(deserialize_with = "deserialize_bases_u32")]
     start: u32,
 
-    #[serde(deserialize_with = "deserialize_bases")]
+    #[serde(deserialize_with = "deserialize_bases_u32")]
     size: u32,
 
     #[serde(rename = "type")]
     ty: MemoryType,
+
+    #[serde(default, deserialize_with = "deserialize_bases_u8")]
+    fill: Option<u8>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -729,13 +747,13 @@ struct ScriptSection {
 #[derive(Serialize, Deserialize)]
 struct Script {
     #[serde(rename = "MEMORY")]
-    memories: HashMap<String, ScriptMemory>,
+    memories: IndexMap<String, ScriptMemory>,
 
     #[serde(rename = "SECTIONS")]
-    sections: BTreeMap<String, ScriptSection>,
+    sections: IndexMap<String, ScriptSection>,
 }
 
-fn deserialize_bases<'de, D>(deserializer: D) -> Result<u32, D::Error>
+fn deserialize_bases_u32<'de, D>(deserializer: D) -> Result<u32, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -750,6 +768,29 @@ where
         u32::from_str_radix(&buf, 10)
             .map_err(|e| de::Error::custom(format!("{buf} is not a valid base 10 address: {e}")))
     }
+}
+
+fn deserialize_bases_u8<'de, D>(deserializer: D) -> Result<Option<u8>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer)?
+        .map(|buf| {
+            if buf.starts_with('$') {
+                u8::from_str_radix(&buf[1..], 16).map_err(|e| {
+                    de::Error::custom(format!("{buf} is not a valid base 16 address: {e}"))
+                })
+            } else if buf.starts_with('%') {
+                u8::from_str_radix(&buf[1..], 2).map_err(|e| {
+                    de::Error::custom(format!("{buf} is not a valid base 2 address: {e}"))
+                })
+            } else {
+                u8::from_str_radix(&buf, 10).map_err(|e| {
+                    de::Error::custom(format!("{buf} is not a valid base 10 address: {e}"))
+                })
+            }
+        })
+        .transpose()
 }
 
 trait FromLeBytes {
