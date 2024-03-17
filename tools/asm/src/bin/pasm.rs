@@ -362,7 +362,7 @@ impl<'a> Asm<'a> {
                 if mne.is_none()
                     && dir.is_none()
                     && !self.str_like("EQU")
-                    && !self.str_like("@MACRO")
+                    && !self.str_like("?MACRO")
                 {
                     let file = self.tok().file();
                     let pos = self.tok().pos();
@@ -414,7 +414,7 @@ impl<'a> Asm<'a> {
                     }
 
                     // being defined to a macro?
-                    if (self.peek()? == Tok::IDENT) && self.str_like("@MACRO") {
+                    if (self.peek()? == Tok::IDENT) && self.str_like("?MACRO") {
                         if label.string.starts_with(".") {
                             return Err(self.err("macro must be global"));
                         }
@@ -1388,7 +1388,7 @@ impl<'a> Asm<'a> {
                             if self.str_like(Dir::IF.0)
                                 || self.str_like(Dir::IFDEF.0)
                                 || self.str_like(Dir::IFNDEF.0)
-                                || self.str_like("@MACRO")
+                                || self.str_like("?MACRO")
                             {
                                 if_level += 1;
                             } else if self.str_like(Dir::END.0) {
@@ -1449,7 +1449,7 @@ impl<'a> Asm<'a> {
                 if self.str_like(Dir::IF.0)
                     || self.str_like(Dir::IFDEF.0)
                     || self.str_like(Dir::IFNDEF.0)
-                    || self.str_like("@MACRO")
+                    || self.str_like("?MACRO")
                 {
                     if_level += 1;
                 } else if self.str_like(Dir::END.0) {
@@ -1724,23 +1724,23 @@ const NATIVE_OPCODES: &[u8] = &[
 struct Dir(&'static str);
 
 impl Dir {
-    const BYTE: Self = Self("@BYTE");
-    const WORD: Self = Self("@WORD");
-    const SECTION: Self = Self("@SECTION");
-    const EXPORT: Self = Self("@EXPORT");
-    const PAD: Self = Self("@PAD");
-    const ALIGN: Self = Self("@ALIGN");
-    const INCLUDE: Self = Self("@INCLUDE");
-    const IF: Self = Self("@IF");
-    const IFDEF: Self = Self("@IFDEF");
-    const IFNDEF: Self = Self("@IFNDEF");
-    const END: Self = Self("@END");
-    const INDEX8: Self = Self("@INDEX8");
-    const INDEX16: Self = Self("@INDEX16");
-    const ACCUM8: Self = Self("@ACCUM8");
-    const ACCUM16: Self = Self("@ACCUM16");
-    const EMULATE: Self = Self("@EMULATE");
-    const NATIVE: Self = Self("@NATIVE");
+    const BYTE: Self = Self("?BYTE");
+    const WORD: Self = Self("?WORD");
+    const SECTION: Self = Self("?SECTION");
+    const EXPORT: Self = Self("?EXPORT");
+    const PAD: Self = Self("?PAD");
+    const ALIGN: Self = Self("?ALIGN");
+    const INCLUDE: Self = Self("?INCLUDE");
+    const IF: Self = Self("?IF");
+    const IFDEF: Self = Self("?IFDEF");
+    const IFNDEF: Self = Self("?IFNDEF");
+    const END: Self = Self("?END");
+    const INDEX8: Self = Self("?INDEX8");
+    const INDEX16: Self = Self("?INDEX16");
+    const ACCUM8: Self = Self("?ACCUM8");
+    const ACCUM16: Self = Self("?ACCUM16");
+    const EMULATE: Self = Self("?EMULATE");
+    const NATIVE: Self = Self("?NATIVE");
 }
 
 const DIRECTIVES: &[Dir] = &[
@@ -1929,7 +1929,7 @@ impl<'a, R: Read + Seek> TokStream<'a> for Lexer<'a, R> {
             // directives, idents, and single chars
             Some(c) => {
                 while let Some(c) = self.reader.peek()? {
-                    if !c.is_ascii_alphanumeric() && !b"_.@".contains(&c) {
+                    if !c.is_ascii_alphanumeric() && !b"_.?".contains(&c) {
                         break;
                     }
                     self.reader.eat();
