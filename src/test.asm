@@ -5,5 +5,5 @@
 Loop:
     jmp Loop
 
-@SECTION "VECTORS"
+$SECTION "VECTORS"
 @WORD IntNmi, IntReset, IntIrq
