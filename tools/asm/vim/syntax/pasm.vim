@@ -21,9 +21,9 @@ syn keyword pasmOpcodeNative bra jml jsl mvn mvp pea pei per phb phd phk phx phy
 syn keyword pasmOpcodeNative plb pld plx ply rep rtl sep stp sty
 syn keyword pasmOpcodeNative tcd tcs tdc trb tsb tsc txy tyx wai wdc xba xce
 
-syn keyword pasmDirective @byte @word @section @export @pad @align @include @if @ifdef @ifndef @end
-syn keyword pasmDirective @index8 @index16 @accum8 @accum16 @emulate @native
-syn keyword pasmDirective @macro @equ
+syn keyword pasmDirective \@byte \@word \@section \@export \@pad \@align \@include \@if \@ifdef \@ifndef \@end
+syn keyword pasmDirective \@index8 \@index16 \@accum8 \@accum16 \@emulate \@native
+syn keyword pasmDirective \@macro \@equ
 
 syn match pasmComment ";.*" contains=pasmTodo
 syn keyword pasmTodo  contained todo fixme xxx warning danger note notice bug
