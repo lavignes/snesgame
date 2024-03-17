@@ -1,9 +1,9 @@
 ; vim: ft=pasm
 
-@SECTION "KERNEL"
+@section "KERNEL"
 
 Loop:
     jmp Loop
 
-$SECTION "VECTORS"
-@WORD IntNmi, IntReset, IntIrq
+@section "VECTORS"
+@word IntNmi, IntReset, IntIrq

@@ -345,7 +345,7 @@ impl<'a> Asm<'a> {
             // special case, setting the PC
             if self.peek()? == Tok::STAR {
                 self.eat();
-                if (self.peek()? != Tok::IDENT) && !self.str_like("@EQU") {
+                if (self.peek()? != Tok::IDENT) && !self.str_like("EQU") {
                     return Err(self.err("expected equ"));
                 }
                 self.eat();
@@ -361,7 +361,7 @@ impl<'a> Asm<'a> {
                 // is this a label?
                 if mne.is_none()
                     && dir.is_none()
-                    && !self.str_like("@EQU")
+                    && !self.str_like("EQU")
                     && !self.str_like("@MACRO")
                 {
                     let file = self.tok().file();
@@ -450,7 +450,7 @@ impl<'a> Asm<'a> {
                         index
                     };
                     // check if this label is being defined to a value
-                    if (self.peek()? == Tok::IDENT) && self.str_like("@EQU") {
+                    if (self.peek()? == Tok::IDENT) && self.str_like("EQU") {
                         self.eat();
                         let expr = self.expr()?;
                         // equ's must always be const, either on the first or second pass
