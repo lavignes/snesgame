@@ -8,8 +8,8 @@ VECTORS = { start = "$FFFA", size = "6", type = "ro", fill = "$ea" }
 
 [SECTIONS]
 INES_HEADER = { load = "INES_HEADER", type = "ro" }
-PRG80 = { load = "PRG80", type = "ro", tags = { bank = "0" } }
-PRGA0 = { load = "PRGA0", type = "ro", tags = { bank = "0" } }
+PRG80 = { load = "PRG80", type = "ro", tags = { bank = "$00" } }
+PRGA0 = { load = "PRGA0", type = "ro", tags = { bank = "$00" } }
 HOME = { load = "HOME", type = "ro" }
 KERNEL = { load = "KERNEL", type = "ro" }
 VECTORS = { load = "VECTORS", type = "ro" }
