@@ -18,7 +18,6 @@ toolchain: $(ASM) $(LD)
 $(ASM) $(LD):
 	cd $(ASM_PATH) && cargo build --release
 
-game.nes: link.toml
 game.nes: $(OBJS)
 	$(LD) $(LD_FLAGS) -o $@ $^
 

@@ -381,7 +381,7 @@ impl<'a> Ld<'a> {
         let mut magic = [0u8; 6];
         reader.read_exact(&mut magic)?;
         if &magic != b"pasm01" {
-            return Err(self.err_in(file, "mad magic"));
+            return Err(self.err_in(file, "bad magic"));
         }
         // fill up a temporary string table
         let mut str_int: StrInterner<'_> = StrInterner::new();
