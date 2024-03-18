@@ -84,7 +84,7 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
 
     let mut ld = Ld::new();
 
-    let def_file = ld.str_int.intern("__DEFINES__");
+    let def_file_section = ld.str_int.intern("__DEFINES__");
     let def_unit = ld.str_int.intern("__STATIC__");
     for (name, val) in &args.define {
         let string = ld.str_int.intern(name);
@@ -92,7 +92,8 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
             Label::new(None, string),
             Expr::Const(*val),
             def_unit,
-            def_file,
+            def_file_section,
+            def_file_section,
             Pos(0, 0),
         ));
     }
@@ -161,6 +162,7 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
         // we update the section pc to be its absolute start address in memory
         section.pc = memory.pc;
         memory.pc += section.data.len() as u32;
+        // the "end" is actually 1 past the last address in the memory
         if memory.pc > memory.end {
             Err(io::Error::new(
                 ErrorKind::InvalidData,
@@ -187,7 +189,7 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
                     Expr::Const(value as i32)
                 }
                 Expr::List(expr) => {
-                    if let Some(value) = ld.expr_eval(expr) {
+                    if let Some(value) = ld.expr_eval(expr, &config.sections) {
                         Expr::Const(value)
                     } else {
                         Expr::List(expr)
@@ -222,7 +224,7 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
                     (pc + section.pc) as i32
                 }
                 RelocVal::List(expr) => {
-                    if let Some(value) = ld.expr_eval(expr) {
+                    if let Some(value) = ld.expr_eval(expr, &config.sections) {
                         value
                     } else {
                         Err(ld.err_in(
@@ -299,10 +301,18 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
                 continue;
             }
             let section = &ld.sections.iter().find(|sec| sec.name == sec_name).unwrap();
+            tracing::trace!(
+                "writing {} bytes of section \"{sec_name}\" in memory \"{mem_name}\"",
+                section.data.len()
+            );
             output.write_all(&section.data)?;
         }
         if let Some(value) = memory.fill {
             let mem = &ld.memories.iter().find(|mem| mem.name == mem_name).unwrap();
+            tracing::trace!(
+                "filling {} bytes of memory \"{mem_name}\" with ${value:02X}",
+                mem.end - mem.pc,
+            );
             for _ in mem.pc..mem.end {
                 output.write(&[value])?;
             }
@@ -432,6 +442,38 @@ impl<'a> Ld<'a> {
                             _ => return Err(self.err_in(file, "malformed expression table")),
                         }
                     }
+                    3 => {
+                        let ty: u8 = self.read_int(&mut reader)?;
+                        match ty {
+                            0 => {
+                                let index: usize = self.read_int(&mut reader)?;
+                                let len: usize = self.read_int(&mut reader)?;
+                                let scope = str_int.slice(index..(index + len)).unwrap();
+                                let index: usize = self.read_int(&mut reader)?;
+                                let len: usize = self.read_int(&mut reader)?;
+                                let string = str_int.slice(index..(index + len)).unwrap();
+                                let index: usize = self.read_int(&mut reader)?;
+                                let len: usize = self.read_int(&mut reader)?;
+                                let tag = str_int.slice(index..(index + len)).unwrap();
+                                let scope = self.str_int.intern(scope);
+                                let string = self.str_int.intern(string);
+                                let tag = self.str_int.intern(tag);
+                                storage.push(ExprNode::Tag(Label::new(Some(scope), string), tag));
+                            }
+                            1 => {
+                                let index: usize = self.read_int(&mut reader)?;
+                                let len: usize = self.read_int(&mut reader)?;
+                                let string = str_int.slice(index..(index + len)).unwrap();
+                                let index: usize = self.read_int(&mut reader)?;
+                                let len: usize = self.read_int(&mut reader)?;
+                                let tag = str_int.slice(index..(index + len)).unwrap();
+                                let string = self.str_int.intern(string);
+                                let tag = self.str_int.intern(tag);
+                                storage.push(ExprNode::Tag(Label::new(None, string), tag));
+                            }
+                            _ => return Err(self.err_in(file, "malformed expression table")),
+                        }
+                    }
                     _ => return Err(self.err_in(file, "malformed expression table")),
                 }
             }
@@ -471,21 +513,21 @@ impl<'a> Ld<'a> {
                 1 => {
                     let index: usize = self.read_int(&mut reader)?;
                     let len: usize = self.read_int(&mut reader)?;
-                    let section = str_int.slice(index..(index + len)).unwrap();
+                    let expr_section = str_int.slice(index..(index + len)).unwrap();
                     let pc: u32 = self.read_int(&mut reader)?;
-                    let section = self.str_int.intern(section);
+                    let expr_section = self.str_int.intern(expr_section);
                     // place the address relative to the start of the section
-                    let pc = if let Some(section) =
-                        self.sections.iter().find(|sec| sec.name == section)
+                    let pc = if let Some(expr_section) =
+                        self.sections.iter().find(|sec| sec.name == expr_section)
                     {
-                        pc + section.pc
+                        pc + expr_section.pc
                     } else {
                         return Err(self.err_in(
                             file,
-                            &format!("section \"{section}\" is not defined in config"),
+                            &format!("section \"{expr_section}\" is not defined in config"),
                         ));
                     };
-                    Expr::Addr(section, pc)
+                    Expr::Addr(expr_section, pc)
                 }
                 2 => {
                     let index: usize = self.read_int(&mut reader)?;
@@ -507,6 +549,10 @@ impl<'a> Ld<'a> {
             };
             let index: usize = self.read_int(&mut reader)?;
             let len: usize = self.read_int(&mut reader)?;
+            let sym_section = str_int.slice(index..(index + len)).unwrap();
+            let sym_section = self.str_int.intern(sym_section);
+            let index: usize = self.read_int(&mut reader)?;
+            let len: usize = self.read_int(&mut reader)?;
             let sym_file = str_int.slice(index..(index + len)).unwrap();
             let sym_file = self.str_int.intern(sym_file);
             let line: usize = self.read_int(&mut reader)?;
@@ -520,7 +566,8 @@ impl<'a> Ld<'a> {
             {
                 return Err(self.err_in(file, &format!("duplicate exported symbol \"{label}\" found\n\tdefined at {}:{}:{}\n\tagain at {sym_file}:{line}:{column}", other.file, other.pos.0, other.pos.1)));
             }
-            self.syms.push(Sym::new(label, value, unit, sym_file, pos));
+            self.syms
+                .push(Sym::new(label, value, unit, sym_section, sym_file, pos));
         }
         // add to sections
         let sections_len: usize = self.read_int(&mut reader)?;
@@ -529,6 +576,7 @@ impl<'a> Ld<'a> {
             let len: usize = self.read_int(&mut reader)?;
             let name = str_int.slice(index..(index + len)).unwrap();
             let name = self.str_int.intern(name);
+            tracing::trace!("loading section \"{name}\"");
             let section = if let Some(section) = self.sections.iter().find(|sec| sec.name == name) {
                 section
             } else {
@@ -554,21 +602,21 @@ impl<'a> Ld<'a> {
                     0 => {
                         let index: usize = self.read_int(&mut reader)?;
                         let len: usize = self.read_int(&mut reader)?;
-                        let section = str_int.slice(index..(index + len)).unwrap();
+                        let reloc_section = str_int.slice(index..(index + len)).unwrap();
                         let pc: u32 = self.read_int(&mut reader)?;
-                        let section = self.str_int.intern(section);
+                        let reloc_section = self.str_int.intern(reloc_section);
                         // place the address relative to the start of the section
-                        let pc = if let Some(section) =
-                            self.sections.iter().find(|sec| sec.name == section)
+                        let pc = if let Some(reloc_section) =
+                            self.sections.iter().find(|sec| sec.name == reloc_section)
                         {
-                            pc + section.pc
+                            pc + reloc_section.pc
                         } else {
                             return Err(self.err_in(
                                 file,
-                                &format!("section \"{section}\" is not defined in config"),
+                                &format!("section \"{reloc_section}\" is not defined in config"),
                             ));
                         };
-                        RelocVal::Addr(section, pc)
+                        RelocVal::Addr(reloc_section, pc)
                     }
                     1 => {
                         let index: usize = self.read_int(&mut reader)?;
@@ -605,6 +653,7 @@ impl<'a> Ld<'a> {
             }
             // extend section
             if let Some(section) = self.sections.iter_mut().find(|sec| sec.name == name) {
+                tracing::trace!("extending section \"{name}\" by {} bytes", data.len());
                 section.data.extend(&data);
                 section.relocs.extend(relocs);
                 section.pc += data.len() as u32;
@@ -619,7 +668,11 @@ impl<'a> Ld<'a> {
         Ok(())
     }
 
-    fn expr_eval(&self, expr: &[ExprNode<'_>]) -> Option<i32> {
+    fn expr_eval(
+        &self,
+        expr: &[ExprNode<'_>],
+        sections: &IndexMap<String, ConfigSection>,
+    ) -> Option<i32> {
         let mut scratch = Vec::new();
         for node in expr.iter() {
             match *node {
@@ -638,9 +691,15 @@ impl<'a> Ld<'a> {
                         }
                         // expand the sub-expression recursively
                         Expr::List(expr) => {
-                            scratch.push(self.expr_eval(expr)?);
+                            scratch.push(self.expr_eval(expr, sections)?);
                         }
                     }
+                }
+                ExprNode::Tag(label, tag) => {
+                    let sym = self.syms.iter().find(|sym| sym.label == label)?;
+                    let tags = sections.get(sym.section).unwrap().tags.as_ref();
+                    let value = tags?.get(tag)?;
+                    scratch.push(*value);
                 }
                 ExprNode::Op(op) => {
                     let rhs = scratch.pop().unwrap();
@@ -714,7 +773,7 @@ enum MemoryType {
 }
 
 #[derive(Serialize, Deserialize)]
-struct ScriptMemory {
+struct ConfigMemory {
     #[serde(deserialize_with = "deserialize_bases_u32")]
     start: u32,
 
@@ -737,20 +796,51 @@ enum SectionType {
 }
 
 #[derive(Serialize, Deserialize)]
-struct ScriptSection {
+struct ConfigSection {
     load: String,
 
     #[serde(rename = "type")]
     ty: SectionType,
+
+    #[serde(default, deserialize_with = "deserialize_tags")]
+    tags: Option<HashMap<String, i32>>,
 }
 
 #[derive(Serialize, Deserialize)]
 struct Script {
     #[serde(rename = "MEMORY")]
-    memories: IndexMap<String, ScriptMemory>,
+    memories: IndexMap<String, ConfigMemory>,
 
     #[serde(rename = "SECTIONS")]
-    sections: IndexMap<String, ScriptSection>,
+    sections: IndexMap<String, ConfigSection>,
+}
+
+fn deserialize_tags<'de, D>(deserializer: D) -> Result<Option<HashMap<String, i32>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let string_map = Option::<HashMap<String, String>>::deserialize(deserializer)?;
+    if let Some(string_map) = string_map {
+        let mut map = HashMap::new();
+        for (name, buf) in string_map {
+            let value = if buf.starts_with('$') {
+                i32::from_str_radix(&buf[1..], 16).map_err(|e| {
+                    de::Error::custom(format!("{buf} is not a valid base 16 value: {e}"))
+                })?
+            } else if buf.starts_with('%') {
+                i32::from_str_radix(&buf[1..], 2).map_err(|e| {
+                    de::Error::custom(format!("{buf} is not a valid base 2 value: {e}"))
+                })?
+            } else {
+                i32::from_str_radix(&buf, 10).map_err(|e| {
+                    de::Error::custom(format!("{buf} is not a valid base 10 value: {e}"))
+                })?
+            };
+            map.insert(name, value);
+        }
+        return Ok(Some(map));
+    }
+    Ok(None)
 }
 
 fn deserialize_bases_u32<'de, D>(deserializer: D) -> Result<u32, D::Error>
@@ -778,15 +868,15 @@ where
         .map(|buf| {
             if buf.starts_with('$') {
                 u8::from_str_radix(&buf[1..], 16).map_err(|e| {
-                    de::Error::custom(format!("{buf} is not a valid base 16 address: {e}"))
+                    de::Error::custom(format!("{buf} is not a valid base 16 value: {e}"))
                 })
             } else if buf.starts_with('%') {
                 u8::from_str_radix(&buf[1..], 2).map_err(|e| {
-                    de::Error::custom(format!("{buf} is not a valid base 2 address: {e}"))
+                    de::Error::custom(format!("{buf} is not a valid base 2 value: {e}"))
                 })
             } else {
                 u8::from_str_radix(&buf, 10).map_err(|e| {
-                    de::Error::custom(format!("{buf} is not a valid base 10 address: {e}"))
+                    de::Error::custom(format!("{buf} is not a valid base 10 value: {e}"))
                 })
             }
         })

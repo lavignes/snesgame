@@ -7,8 +7,9 @@ LD := $(ASM_PATH)/target/release/plink
 SRCS := $(call rwildcard,src,*.asm)
 OBJS := $(SRCS:.asm=.o)
 
-ASM_FLAGS :=
-LD_FLAGS := -c link.toml
+LOG_LEVEL := ERROR
+ASM_FLAGS := -l $(LOG_LEVEL)
+LD_FLAGS := -c link.toml -l $(LOG_LEVEL)
 
 all: toolchain game.nes
 

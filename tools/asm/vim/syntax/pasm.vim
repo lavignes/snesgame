@@ -7,7 +7,7 @@ syn match pasmLocalLabel "^\.[a-z_][a-z0-9_]*"
 
 syn keyword pasmRegister x y s *
 
-syn match pasmOperator display "\%(+\|-\|/\|*\|\^\|\~\|&\||\|!\|>\|<\|%\)=\?"
+syn match pasmOperator display "\%(+\|-\|/\|*\|\^\|\~\|&\||\|!\|>\|<\|%\|=\)=\?"
 syn match pasmOperator display "&&\|||\|<<\|>>\|\~>"
 
 syn keyword pasmOpcode adc and asl bcc bcs beq bit bmi bne bpl brk brl bvc bvs
@@ -39,7 +39,7 @@ syn match pasmDirective "?accum16"
 syn match pasmDirective "?emulate"
 syn match pasmDirective "?native"
 syn match pasmDirective "?macro"
-syn match pasmDirective "equ"
+syn match pasmDirective "?tag"
 
 syn match pasmComment ";.*" contains=pasmTodo
 syn keyword pasmTodo contained todo fixme xxx warning danger note notice bug

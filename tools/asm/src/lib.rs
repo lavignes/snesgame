@@ -156,8 +156,9 @@ pub enum Expr<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExprNode<'a> {
     Const(i32),
-    Label(Label<'a>),
     Op(Op),
+    Label(Label<'a>),
+    Tag(Label<'a>, &'a str),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -200,16 +201,25 @@ pub struct Sym<'a> {
     pub label: Label<'a>,
     pub value: Expr<'a>,
     pub unit: &'a str,
+    pub section: &'a str,
     pub file: &'a str,
     pub pos: Pos,
 }
 
 impl<'a> Sym<'a> {
-    pub fn new(label: Label<'a>, value: Expr<'a>, unit: &'a str, file: &'a str, pos: Pos) -> Self {
+    pub fn new(
+        label: Label<'a>,
+        value: Expr<'a>,
+        unit: &'a str,
+        section: &'a str,
+        file: &'a str,
+        pos: Pos,
+    ) -> Self {
         Self {
             label,
             value,
             unit,
+            section,
             file,
             pos,
         }
@@ -270,6 +280,7 @@ impl Tok {
     pub const COMMA: Self = Self(b',');
     pub const ASP: Self = Self(b'@');
     pub const COLON: Self = Self(b':');
+    pub const EQU: Self = Self(b'=');
 
     pub const X: Self = Self(b'X');
     pub const Y: Self = Self(b'Y');

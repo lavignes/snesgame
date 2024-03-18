@@ -1,13 +1,15 @@
 [MEMORY]
 INES_HEADER = { start = "0", size = "16", type = "ro" }
-PRG0 = { start = "$8000", size = "$4000", type = "ro", fill = "0" }
-PRG1 = { start = "$8000", size = "$4000", type = "ro", fill = "0" }
-KERNEL = { start = "$C000", size = "$3FFA", type = "ro", fill = "0" }
-VECTORS = { start = "$FFFA", size = "6", type = "ro", fill = "0" }
+PRG80 = { start = "$8000", size = "$2000", type = "ro", fill = "$ea" }
+PRGA0 = { start = "$A000", size = "$2000", type = "ro", fill = "$ea" }
+HOME = { start = "$C000", size = "$2000", type = "ro", fill = "$ea" }
+KERNEL = { start = "$E000", size = "$1FFA", type = "ro", fill = "$ea" }
+VECTORS = { start = "$FFFA", size = "6", type = "ro", fill = "$ea" }
 
 [SECTIONS]
 INES_HEADER = { load = "INES_HEADER", type = "ro" }
-PRG0 = { load = "PRG0", type = "ro" }
-PRG1 = { load = "PRG1", type = "ro" }
+PRG80 = { load = "PRG80", type = "ro", tags = { bank = "0" } }
+PRGA0 = { load = "PRGA0", type = "ro", tags = { bank = "0" } }
+HOME = { load = "HOME", type = "ro" }
 KERNEL = { load = "KERNEL", type = "ro" }
 VECTORS = { load = "VECTORS", type = "ro" }

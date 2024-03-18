@@ -69,7 +69,7 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
 
     let mut asm = Asm::new(lexer);
     asm.str_int.intern(input); // dont forget to intern the input name
-    let def_file = asm.str_int.intern("__DEFINES__");
+    let def_file_section = asm.str_int.intern("__DEFINES__");
     let def_unit = asm.str_int.intern("__STATIC__");
     for (name, val) in &args.define {
         let string = asm.str_int.intern(name);
@@ -77,7 +77,8 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
             Label::new(None, string),
             Expr::Const(*val),
             def_unit,
-            def_file,
+            def_file_section,
+            def_file_section,
             Pos(0, 0),
         ));
     }
@@ -152,6 +153,23 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
                     output.write_all(&index.to_le_bytes())?;
                     output.write_all(&label.string.len().to_le_bytes())?;
                 }
+                ExprNode::Tag(label, tag) => {
+                    output.write_all(&[3])?;
+                    if let Some(scope) = label.scope {
+                        output.write_all(&[0])?;
+                        let index = asm.str_int.offset(scope).unwrap();
+                        output.write_all(&index.to_le_bytes())?;
+                        output.write_all(&scope.len().to_le_bytes())?;
+                    } else {
+                        output.write_all(&[1])?;
+                    }
+                    let index = asm.str_int.offset(label.string).unwrap();
+                    output.write_all(&index.to_le_bytes())?;
+                    output.write_all(&label.string.len().to_le_bytes())?;
+                    let index = asm.str_int.offset(tag).unwrap();
+                    output.write_all(&index.to_le_bytes())?;
+                    output.write_all(&tag.len().to_le_bytes())?;
+                }
             }
         }
     }
@@ -190,6 +208,9 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
         let index = asm.str_int.offset(sym.unit).unwrap();
         output.write_all(&index.to_le_bytes())?;
         output.write_all(&sym.unit.len().to_le_bytes())?;
+        let index = asm.str_int.offset(sym.section).unwrap();
+        output.write_all(&index.to_le_bytes())?;
+        output.write_all(&sym.section.len().to_le_bytes())?;
         let index = asm.str_int.offset(sym.file).unwrap();
         output.write_all(&index.to_le_bytes())?;
         output.write_all(&sym.file.len().to_le_bytes())?;
@@ -197,17 +218,22 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
         output.write_all(&sym.pos.1.to_le_bytes())?;
     }
     // filter out empty sections
-    output.write_all(
-        &asm.sections
-            .iter()
-            .filter(|section| section.data.is_empty())
-            .count()
-            .to_le_bytes(),
-    )?;
+    let count = &asm
+        .sections
+        .iter()
+        .filter(|section| !section.data.is_empty())
+        .count();
+    tracing::trace!("writing {count} sections");
+    output.write_all(&count.to_le_bytes())?;
     for section in asm.sections {
         if section.data.is_empty() {
             continue;
         }
+        tracing::trace!(
+            "writing {} bytes of section \"{}\"",
+            section.data.len(),
+            section.name,
+        );
         let index = asm.str_int.offset(section.name).unwrap();
         output.write_all(&index.to_le_bytes())?;
         output.write_all(&section.name.len().to_le_bytes())?;
@@ -345,8 +371,8 @@ impl<'a> Asm<'a> {
             // special case, setting the PC
             if self.peek()? == Tok::STAR {
                 self.eat();
-                if (self.peek()? != Tok::IDENT) && !self.str_like("EQU") {
-                    return Err(self.err("expected equ"));
+                if self.peek()? != Tok::EQU {
+                    return Err(self.err("expected ="));
                 }
                 self.eat();
                 let expr = self.expr()?;
@@ -359,11 +385,7 @@ impl<'a> Asm<'a> {
                 let mne = MNEMONICS.iter().find(|mne| self.str_like(mne.0 .0));
                 let dir = DIRECTIVES.iter().find(|dir| self.str_like(dir.0));
                 // is this a label?
-                if mne.is_none()
-                    && dir.is_none()
-                    && !self.str_like("EQU")
-                    && !self.str_like("?MACRO")
-                {
+                if mne.is_none() && dir.is_none() && !self.str_like("?MACRO") {
                     let file = self.tok().file();
                     let pos = self.tok().pos();
                     // is this a defined macro?
@@ -440,17 +462,19 @@ impl<'a> Asm<'a> {
                         // save in the symbol table with temporary value
                         let index = self.syms.len();
                         let unit = self.str_int.intern("__STATIC__");
+                        let section = self.sections[self.section].name;
                         self.syms.push(Sym::new(
                             label,
                             Expr::Const(0),
                             unit,
+                            section,
                             self.tok().file(),
                             pos,
                         ));
                         index
                     };
                     // check if this label is being defined to a value
-                    if (self.peek()? == Tok::IDENT) && self.str_like("EQU") {
+                    if self.peek()? == Tok::EQU {
                         self.eat();
                         let expr = self.expr()?;
                         // equ's must always be const, either on the first or second pass
@@ -760,16 +784,37 @@ impl<'a> Asm<'a> {
                     continue;
                 }
                 Tok::IDENT => {
-                    let string = self.str_intern();
-                    let label = if !string.starts_with(".") {
-                        Label::new(None, string)
-                    } else {
-                        Label::new(self.scope, string)
-                    };
                     if seen_val {
                         return Err(self.err("expected operator"));
                     }
-                    self.expr_buffer.push(ExprNode::Label(label));
+                    // check for possible tag lookup
+                    if self.str_like("?TAG") {
+                        self.eat();
+                        if self.peek()? != Tok::IDENT {
+                            return Err(self.err("expected label"));
+                        }
+                        let string = self.str_intern();
+                        let label = if !string.starts_with(".") {
+                            Label::new(None, string)
+                        } else {
+                            Label::new(self.scope, string)
+                        };
+                        self.eat();
+                        self.expect(Tok::COMMA)?;
+                        if self.peek()? != Tok::STR {
+                            return Err(self.err("expected tag name"));
+                        }
+                        let tag = self.str_intern();
+                        self.expr_buffer.push(ExprNode::Tag(label, tag));
+                    } else {
+                        let string = self.str_intern();
+                        let label = if !string.starts_with(".") {
+                            Label::new(None, string)
+                        } else {
+                            Label::new(self.scope, string)
+                        };
+                        self.expr_buffer.push(ExprNode::Label(label));
+                    }
                     seen_val = true;
                     self.eat();
                     continue;
@@ -825,6 +870,9 @@ impl<'a> Asm<'a> {
                     } else {
                         return None; // needs to be solved later
                     }
+                }
+                ExprNode::Tag(_, _) => {
+                    return None; // tags can only be solved at link-time
                 }
                 ExprNode::Op(op) => {
                     let rhs = scratch.pop().unwrap();
@@ -1246,50 +1294,54 @@ impl<'a> Asm<'a> {
 
     fn directive(&mut self, dir: Dir) -> io::Result<()> {
         match dir {
-            Dir::BYTE => loop {
+            Dir::BYTE => {
                 self.eat();
-                if self.peek()? == Tok::STR {
-                    if self.emit {
-                        self.write_str();
+                loop {
+                    if self.peek()? == Tok::STR {
+                        if self.emit {
+                            self.write_str();
+                        }
+                        self.add_pc(self.str().len() as u32)?;
+                        self.eat();
+                    } else {
+                        let pos = self.tok().pos();
+                        let expr = self.expr()?;
+                        if self.emit {
+                            if let Ok(value) = self.const_expr(expr) {
+                                self.write(&self.range_8(value)?.to_le_bytes());
+                            } else {
+                                self.write(&[0x42]);
+                                self.reloc(0, 1, expr, pos);
+                            }
+                        }
+                        self.add_pc(1)?;
                     }
-                    self.add_pc(self.str().len() as u32)?;
+                    if self.peek()? != Tok::COMMA {
+                        break;
+                    }
                     self.eat();
-                } else {
+                }
+            }
+            Dir::WORD => {
+                self.eat();
+                loop {
                     let pos = self.tok().pos();
                     let expr = self.expr()?;
                     if self.emit {
                         if let Ok(value) = self.const_expr(expr) {
-                            self.write(&self.range_8(value)?.to_le_bytes());
+                            self.write(&self.range_16(value)?.to_le_bytes());
                         } else {
-                            self.write(&[0x42]);
-                            self.reloc(0, 1, expr, pos);
+                            self.write(&[0x42, 0x42]);
+                            self.reloc(0, 2, expr, pos);
                         }
                     }
-                    self.add_pc(1)?;
-                }
-                if self.peek()? != Tok::COMMA {
-                    break;
-                }
-                self.eat();
-            },
-            Dir::WORD => loop {
-                self.eat();
-                let pos = self.tok().pos();
-                let expr = self.expr()?;
-                if self.emit {
-                    if let Ok(value) = self.const_expr(expr) {
-                        self.write(&self.range_16(value)?.to_le_bytes());
-                    } else {
-                        self.write(&[0x42, 0x42]);
-                        self.reloc(0, 2, expr, pos);
+                    self.add_pc(2)?;
+                    if self.peek()? != Tok::COMMA {
+                        break;
                     }
+                    self.eat();
                 }
-                self.add_pc(2)?;
-                if self.peek()? != Tok::COMMA {
-                    break;
-                }
-                self.eat();
-            },
+            }
             Dir::SECTION => {
                 self.eat();
                 if self.peek()? != Tok::STR {
@@ -1314,26 +1366,32 @@ impl<'a> Asm<'a> {
             }
             Dir::EXPORT => {
                 self.eat();
-                if self.peek()? != Tok::IDENT {
-                    return Err(self.err("expected symbol name"));
-                }
-                let string = self.str_intern();
-                if string.starts_with(".") {
-                    return Err(self.err("exports must be global"));
-                }
-                if self.emit {
-                    let label = Label::new(None, string);
-                    let unit = self.str_int.intern("__EXPORT__");
-                    if let Some(sym) = self.syms.iter_mut().find(|sym| &sym.label == &label) {
-                        if sym.unit == unit {
-                            return Err(self.err("symbol is already exported"));
-                        }
-                        sym.unit = unit;
-                    } else {
-                        return Err(self.err("cannot export undeclared symbol"));
+                loop {
+                    if self.peek()? != Tok::IDENT {
+                        return Err(self.err("expected symbol name"));
                     }
+                    let string = self.str_intern();
+                    if string.starts_with(".") {
+                        return Err(self.err("exports must be global"));
+                    }
+                    if self.emit {
+                        let label = Label::new(None, string);
+                        let unit = self.str_int.intern("__EXPORT__");
+                        if let Some(sym) = self.syms.iter_mut().find(|sym| &sym.label == &label) {
+                            if sym.unit == unit {
+                                return Err(self.err("symbol is already exported"));
+                            }
+                            sym.unit = unit;
+                        } else {
+                            return Err(self.err("cannot export undeclared symbol"));
+                        }
+                    }
+                    self.eat();
+                    if self.peek()? != Tok::COMMA {
+                        break;
+                    }
+                    self.eat();
                 }
-                self.eat();
             }
             Dir::PAD => {
                 self.eat();
