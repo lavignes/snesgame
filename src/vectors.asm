@@ -2,4 +2,4 @@
 
 ?section "VECTORS"
 
-?word Nmi, Reset, Irq
+?data16 Nmi, Reset, Irq
