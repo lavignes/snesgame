@@ -1332,7 +1332,7 @@ impl<'a> Asm<'a> {
 
     fn directive(&mut self, dir: Dir) -> io::Result<()> {
         match dir {
-            Dir::BYTE => {
+            Dir::DATA8 => {
                 self.eat();
                 loop {
                     if self.peek()? == Tok::STR {
@@ -1360,7 +1360,7 @@ impl<'a> Asm<'a> {
                     self.eat();
                 }
             }
-            Dir::WORD => {
+            Dir::DATA16 => {
                 self.eat();
                 loop {
                     let pos = self.tok().pos();
@@ -1380,7 +1380,7 @@ impl<'a> Asm<'a> {
                     self.eat();
                 }
             }
-            Dir::LONG => {
+            Dir::DATA24 => {
                 self.eat();
                 loop {
                     let pos = self.tok().pos();
@@ -1851,9 +1851,9 @@ const NATIVE_OPCODES: &[u8] = &[
 struct Dir(&'static str);
 
 impl Dir {
-    const BYTE: Self = Self("?BYTE");
-    const WORD: Self = Self("?WORD");
-    const LONG: Self = Self("?LONG");
+    const DATA8: Self = Self("?DATA8");
+    const DATA16: Self = Self("?DATA16");
+    const DATA24: Self = Self("?DATA24");
     const SECTION: Self = Self("?SECTION");
     const EXPORT: Self = Self("?EXPORT");
     const PAD: Self = Self("?PAD");
@@ -1873,9 +1873,9 @@ impl Dir {
 }
 
 const DIRECTIVES: &[Dir] = &[
-    Dir::BYTE,
-    Dir::WORD,
-    Dir::LONG,
+    Dir::DATA8,
+    Dir::DATA16,
+    Dir::DATA24,
     Dir::SECTION,
     Dir::EXPORT,
     Dir::PAD,
