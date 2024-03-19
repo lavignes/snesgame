@@ -2,6 +2,8 @@
 
 ?section "KERNEL"
 
+?export Reset, Nmi, Irq
+
 Nmi:
     rti
 

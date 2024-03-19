@@ -189,7 +189,7 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
                     Expr::Const(value as i32)
                 }
                 Expr::List(expr) => {
-                    if let Some(value) = ld.expr_eval(expr, &config.sections) {
+                    if let Some(value) = ld.expr_eval(ld.syms[i].unit, expr, &config.sections) {
                         Expr::Const(value)
                     } else {
                         Expr::List(expr)
@@ -224,7 +224,7 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
                     (pc + section.pc) as i32
                 }
                 RelocVal::List(expr) => {
-                    if let Some(value) = ld.expr_eval(expr, &config.sections) {
+                    if let Some(value) = ld.expr_eval(reloc.unit, expr, &config.sections) {
                         value
                     } else {
                         Err(ld.err_in(
@@ -636,7 +636,7 @@ impl<'a> Ld<'a> {
                 let unit = if unit == "__STATIC__" {
                     self.str_int.intern(file)
                 } else {
-                    self.str_int.intern(unit)
+                    self.str_int.intern("__EXPORT__")
                 };
                 let reloc_file = self.str_int.intern(reloc_file);
                 let line: usize = self.read_int(&mut reader)?;
@@ -670,6 +670,7 @@ impl<'a> Ld<'a> {
 
     fn expr_eval(
         &self,
+        unit: &'_ str,
         expr: &[ExprNode<'_>],
         sections: &IndexMap<String, ConfigSection>,
     ) -> Option<i32> {
@@ -678,7 +679,9 @@ impl<'a> Ld<'a> {
             match *node {
                 ExprNode::Const(value) => scratch.push(value),
                 ExprNode::Label(label) => {
-                    let sym = self.syms.iter().find(|sym| sym.label == label)?;
+                    let sym = self.syms.iter().find(|sym| {
+                        (sym.label == label) && ((sym.unit == unit) || (sym.unit == "__EXPORT__"))
+                    })?;
                     match sym.value {
                         Expr::Const(value) => scratch.push(value),
                         Expr::Addr(section, pc) => {
@@ -691,12 +694,14 @@ impl<'a> Ld<'a> {
                         }
                         // expand the sub-expression recursively
                         Expr::List(expr) => {
-                            scratch.push(self.expr_eval(expr, sections)?);
+                            scratch.push(self.expr_eval(unit, expr, sections)?);
                         }
                     }
                 }
                 ExprNode::Tag(label, tag) => {
-                    let sym = self.syms.iter().find(|sym| sym.label == label)?;
+                    let sym = self.syms.iter().find(|sym| {
+                        (sym.label == label) && ((sym.unit == unit) || (sym.unit == "__EXPORT__"))
+                    })?;
                     let tags = sections.get(sym.section).unwrap().tags.as_ref();
                     let value = tags?.get(tag)?;
                     scratch.push(*value);
