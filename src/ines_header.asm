@@ -15,14 +15,14 @@ HDR_CHR_NVRAM_SIZE  = 0
 HDR_CHR_RAM_SIZE    = 7     ; 8k - 64 * 2^n bytes
 HDR_REGION          = 0     ; ntsc
 
-?byte "NES", $1A
-?byte HDR_PRG_ROM_SIZE
-?byte HDR_CHR_ROM_SIZE
-?byte ((HDR_MAPPER_ID & $0F) << 4) | (HDR_FOUR_SCREEN << 3) | (HDR_BATTERY << 1) | HDR_MIRRORING
-?byte (HDR_MAPPER_ID & $F0) | %1000
-?byte (HDR_SUBMAPPER_ID << 4) | ((HDR_MAPPER_ID & $F00) >> 8)
-?byte ((HDR_PRG_ROM_SIZE & $F00) >> 4) | ((HDR_CHR_ROM_SIZE & $F00) >> 8)
-?byte (HDR_PRG_NVRAM_SIZE << 4) | HDR_PRG_RAM_SIZE
-?byte (HDR_CHR_NVRAM_SIZE << 4) | HDR_CHR_RAM_SIZE
-?byte HDR_REGION
-?byte 0, 0, 0
+?data8 "NES", $1A
+?data8 HDR_PRG_ROM_SIZE
+?data8 HDR_CHR_ROM_SIZE
+?data8 ((HDR_MAPPER_ID & $0F) << 4) | (HDR_FOUR_SCREEN << 3) | (HDR_BATTERY << 1) | HDR_MIRRORING
+?data8 (HDR_MAPPER_ID & $F0) | %1000
+?data8 (HDR_SUBMAPPER_ID << 4) | ((HDR_MAPPER_ID & $F00) >> 8)
+?data8 ((HDR_PRG_ROM_SIZE & $F00) >> 4) | ((HDR_CHR_ROM_SIZE & $F00) >> 8)
+?data8 (HDR_PRG_NVRAM_SIZE << 4) | HDR_PRG_RAM_SIZE
+?data8 (HDR_CHR_NVRAM_SIZE << 4) | HDR_CHR_RAM_SIZE
+?data8 HDR_REGION
+?data8 0, 0, 0
