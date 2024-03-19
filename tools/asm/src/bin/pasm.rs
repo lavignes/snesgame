@@ -784,6 +784,40 @@ impl<'a> Asm<'a> {
                     continue;
                 }
                 Tok::IDENT => {
+                    // is this a macro?
+                    if let Some(mac) = self
+                        .macros
+                        .iter()
+                        .find(|mac| self.str() == mac.name)
+                        .copied()
+                    {
+                        let file = self.tok().file();
+                        let pos = self.tok().pos();
+                        self.eat();
+                        let mut args = Vec::new();
+                        loop {
+                            match self.peek()? {
+                                Tok::NEWLINE | Tok::EOF => break,
+                                Tok::IDENT => args.push(MacroTok::Ident(self.str_intern())),
+                                Tok::STR => args.push(MacroTok::Str(self.str_intern())),
+                                Tok::NUM => args.push(MacroTok::Num(self.tok().num())),
+                                tok => args.push(MacroTok::Tok(tok)),
+                            }
+                            self.eat();
+                            if self.peek()? != Tok::COMMA {
+                                break;
+                            }
+                            self.eat();
+                        }
+                        self.toks.push(Box::new(MacroInvocation {
+                            inner: mac,
+                            index: 0,
+                            args,
+                            file,
+                            pos,
+                        }));
+                        continue;
+                    }
                     if seen_val {
                         return Err(self.err("expected operator"));
                     }
@@ -819,8 +853,12 @@ impl<'a> Asm<'a> {
                     self.eat();
                     continue;
                 }
-                // TODO need to check if seen_val is true and if_level == 0
-                _ => {
+                tok => {
+                    // we might be in a macro or something
+                    if (tok == Tok::EOF) && (self.toks.len() > 1) {
+                        self.toks.pop();
+                        continue;
+                    }
                     if !seen_val {
                         return Err(self.err("expected value"));
                     }
@@ -1540,6 +1578,10 @@ impl<'a> Asm<'a> {
                 } else if self.str_like(Dir::END.0) {
                     if if_level == 0 {
                         self.eat();
+                        // trim tailing newlines
+                        while let Some(MacroTok::Tok(Tok::NEWLINE)) = toks.last() {
+                            toks.pop();
+                        }
                         toks.push(MacroTok::Tok(Tok::EOF));
                         break;
                     }
@@ -1555,10 +1597,6 @@ impl<'a> Asm<'a> {
                 tok => toks.push(MacroTok::Tok(tok)),
             }
             self.eat();
-        }
-        // trim newlines in a macro
-        while let Some(MacroTok::Tok(Tok::NEWLINE)) = toks.last() {
-            toks.pop();
         }
         let toks = self.tok_int.intern(&toks);
         self.macros.push(Macro {
@@ -2113,7 +2151,7 @@ impl<'a> TokStream<'a> for MacroInvocation<'a> {
         io::Error::new(
             ErrorKind::InvalidData,
             format!(
-                "{}:{}:{}: in macro {}: {msg}",
+                "{}:{}:{}: in macro \"{}\": {msg}",
                 self.file, self.pos.0, self.pos.1, self.inner.name
             ),
         )

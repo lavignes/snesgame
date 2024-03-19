@@ -10,6 +10,10 @@ Nmi:
 Irq:
     rti
 
+bankof: ?macro
+    ?tag \1, "bank"
+?end
+
 MMC3_BANK_SELECT = $8000
 MMC3_BANK_DATA   = $8001
 MMC3_BASE        = %00000000
@@ -28,5 +32,13 @@ Reset:
     lda #1
     sta MMC3_BANK_DATA
 
+    ldx #(bankof Foo)
+
     jmp Reset
+
+
+?section "PRGA0"
+
+Foo:
+    nop
 
