@@ -1342,6 +1342,26 @@ impl<'a> Asm<'a> {
                     self.eat();
                 }
             }
+            Dir::LONG => {
+                self.eat();
+                loop {
+                    let pos = self.tok().pos();
+                    let expr = self.expr()?;
+                    if self.emit {
+                        if let Ok(value) = self.const_expr(expr) {
+                            self.write(&self.range_24(value)?.to_le_bytes());
+                        } else {
+                            self.write(&[0x42, 0x42, 0x42]);
+                            self.reloc(0, 3, expr, pos);
+                        }
+                    }
+                    self.add_pc(3)?;
+                    if self.peek()? != Tok::COMMA {
+                        break;
+                    }
+                    self.eat();
+                }
+            }
             Dir::SECTION => {
                 self.eat();
                 if self.peek()? != Tok::STR {
@@ -1795,6 +1815,7 @@ struct Dir(&'static str);
 impl Dir {
     const BYTE: Self = Self("?BYTE");
     const WORD: Self = Self("?WORD");
+    const LONG: Self = Self("?LONG");
     const SECTION: Self = Self("?SECTION");
     const EXPORT: Self = Self("?EXPORT");
     const PAD: Self = Self("?PAD");
@@ -1816,6 +1837,7 @@ impl Dir {
 const DIRECTIVES: &[Dir] = &[
     Dir::BYTE,
     Dir::WORD,
+    Dir::LONG,
     Dir::SECTION,
     Dir::EXPORT,
     Dir::PAD,

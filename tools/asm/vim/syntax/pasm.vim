@@ -23,6 +23,7 @@ syn keyword pasmOpcodeNative tcd tcs tdc trb tsb tsc txy tyx wai wdc xba xce
 
 syn match pasmDirective "?byte"
 syn match pasmDirective "?word"
+syn match pasmDirective "?long"
 syn match pasmDirective "?section"
 syn match pasmDirective "?export"
 syn match pasmDirective "?pad"
