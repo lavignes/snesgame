@@ -2,7 +2,7 @@
 
 ?section "KERNEL"
 
-?export Reset, Nmi, Irq
+?export Nmi, Reset, Irq
 
 Nmi:
     rti
@@ -32,13 +32,6 @@ Reset:
     lda #1
     sta MMC3_BANK_DATA
 
-    ldx #(bankof Foo)
-
     jmp Reset
 
-
-?section "PRGA0"
-
-Foo:
-    nop
 
