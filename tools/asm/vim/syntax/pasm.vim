@@ -21,9 +21,9 @@ syn keyword pasmOpcodeNative bra jml jsl mvn mvp pea pei per phb phd phk phx phy
 syn keyword pasmOpcodeNative plb pld plx ply rep rtl sep stp sty
 syn keyword pasmOpcodeNative tcd tcs tdc trb tsb tsc txy tyx wai wdc xba xce
 
-syn match pasmDirective "?byte"
-syn match pasmDirective "?word"
-syn match pasmDirective "?long"
+syn match pasmDirective "?data8"
+syn match pasmDirective "?data16"
+syn match pasmDirective "?data24"
 syn match pasmDirective "?section"
 syn match pasmDirective "?export"
 syn match pasmDirective "?pad"
