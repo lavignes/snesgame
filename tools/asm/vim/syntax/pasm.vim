@@ -38,6 +38,7 @@ syn match pasmDirective "?accum8"
 syn match pasmDirective "?accum16"
 syn match pasmDirective "?emulate"
 syn match pasmDirective "?native"
+syn match pasmDirective "?res"
 syn match pasmDirective "?macro"
 syn match pasmDirective "?tag"
 

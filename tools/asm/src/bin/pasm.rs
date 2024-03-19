@@ -1493,6 +1493,13 @@ impl<'a> Asm<'a> {
                 self.eat();
                 self.native_mode = true;
             }
+            Dir::RES => {
+                self.eat();
+                let expr = self.expr()?;
+                let expr = self.const_expr(expr)?;
+                let res = self.range_24(expr)?;
+                self.add_pc(res)?;
+            }
             _ => unreachable!(),
         }
         Ok(())
@@ -1528,6 +1535,10 @@ impl<'a> Asm<'a> {
                 tok => toks.push(MacroTok::Tok(tok)),
             }
             self.eat();
+        }
+        // trim newlines in a macro
+        while let Some(MacroTok::Tok(Tok::NEWLINE)) = toks.last() {
+            toks.pop();
         }
         let toks = self.tok_int.intern(&toks);
         self.macros.push(Macro {
@@ -1799,6 +1810,7 @@ impl Dir {
     const ACCUM16: Self = Self("?ACCUM16");
     const EMULATE: Self = Self("?EMULATE");
     const NATIVE: Self = Self("?NATIVE");
+    const RES: Self = Self("?RES");
 }
 
 const DIRECTIVES: &[Dir] = &[
@@ -1819,6 +1831,7 @@ const DIRECTIVES: &[Dir] = &[
     Dir::ACCUM16,
     Dir::EMULATE,
     Dir::NATIVE,
+    Dir::RES,
 ];
 
 const GRAPHEMES: &[(&[u8; 2], Tok)] = &[
