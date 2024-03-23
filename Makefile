@@ -29,5 +29,5 @@ deepclean: clean
 
 clean:
 	rm -f $(call rwildcard,src,*.o)
-	rm -f game.asm
+	rm -f game.nes
 
