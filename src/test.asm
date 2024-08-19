@@ -3,20 +3,13 @@
 \native \index16 \accum8
 
 \section "HEADER"
-\byte "YO"
-\byte "GAME"
-\byte 0, 0, 0, 0, 0, 0
-\byte 0         ; 0 KiB Expansion Flash
-\byte 0         ; 0 KiB Expansion RAM
-\byte 0         ; "Special" Version
-\byte 0         ; Chipset Subtype
 \byte "SNES GAME            "
-\byte $25       ; Fast ExHiROM
+\byte $35       ; Fast ExHiROM
 \byte $02       ; ROM + SRAM + Battery
 \byte 13        ; 2^13 KiB ROM (8 MiB)
 \byte 5         ; 2^5 KiB SRAM (32 KiB)
 \byte 1         ; NTSC
-\byte $33       ; Developer ID (expanded ROM Header)
+\byte 0         ; Developer ID
 \byte 0         ; ROM Version
 \word $FFFF     ; Checksum xor $FFFF
 \word 0         ; Checksum
