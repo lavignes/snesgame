@@ -3,8 +3,8 @@ ZEROPAGE = { start = "$000000", size = "$100", type = "rw" }
 LORAM = { start = "$000200", size = "$1800", type = "rw" }
 
 FASTROM = { start = "$C00000", size = "$400000", type = "ro", fill = "$EA" }
-SLOWROM0 = { start = "$400000", size = "$FFB0", type = "ro", fill = "$EA" }
-HEADER = { start = "$40FFB0", size = "$30", type = "ro" }
+SLOWROM0 = { start = "$400000", size = "$FFC0", type = "ro", fill = "$EA" }
+HEADER = { start = "$40FFC0", size = "$20", type = "ro" }
 VECTORS = { start = "$40FFE0", size = "$20", type = "ro" }
 SLOWROM1 = { start = "$410000", size = "$3E0000", type = "ro", fill = "$EA" }
 SLOWROM2 = { start = "$3E8000", size = "$8000", type = "ro", fill = "$EA" }
