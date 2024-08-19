@@ -6,7 +6,7 @@ use std::{
     error::Error,
     fmt::Write as FmtWrite,
     fs::{self, File},
-    io::{self, ErrorKind, Read, Seek, Write},
+    io::{self, BufWriter, ErrorKind, Read, Seek, Write},
     mem,
     path::PathBuf,
     process::ExitCode,
@@ -15,7 +15,8 @@ use std::{
 
 use clap::Parser;
 use nyasm::{
-    Expr, ExprNode, Label, Op, Pos, Reloc, RelocVal, Section, SliceInterner, StrInterner, Sym, Tok,
+    Expr, ExprNode, Label, Op, Pos, Reloc, RelocVal, Section, SliceInterner, StrInterner, Sym,
+    SymFlags, Tok,
 };
 use tracing::Level;
 
@@ -83,6 +84,7 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
                 line: 1,
                 column: 1,
             },
+            SymFlags::EQU,
         ));
     }
 
@@ -94,14 +96,14 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
     asm.pass()?;
 
     let mut output: Box<dyn Write> = match args.output.clone() {
-        Some(path) => Box::new(
+        Some(path) => Box::new(BufWriter::new(
             File::options()
                 .write(true)
                 .create(true)
                 .truncate(true)
                 .open(path)
                 .map_err(|e| format!("cant open file: {e}"))?,
-        ),
+        )),
         None => Box::new(io::stdout()),
     };
 
@@ -221,6 +223,7 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
             output.write_all(&(sym.pos.file.len() as u32).to_le_bytes())?;
             output.write_all(&(sym.pos.line as u32).to_le_bytes())?;
             output.write_all(&(sym.pos.column as u32).to_le_bytes())?;
+            output.write_all(&[sym.flags])?;
         }
         // filter out empty sections
         let count = asm
@@ -450,7 +453,7 @@ impl<'a> Asm<'a> {
                         let unit = self.str_int.intern("__STATIC__");
                         let section = self.sections[self.section].name;
                         self.syms
-                            .push(Sym::new(label, Expr::Const(0), unit, section, pos));
+                            .push(Sym::new(label, Expr::Const(0), unit, section, pos, 0));
                         index
                     };
 
@@ -480,8 +483,10 @@ impl<'a> Asm<'a> {
                             // equ's must always be const, either on the first or second pass
                             if self.emit {
                                 self.syms[index].value = Expr::Const(self.const_expr(expr)?);
+                                self.syms[index].flags = SymFlags::EQU;
                             } else if let Expr::Const(expr) = expr {
                                 self.syms[index].value = Expr::Const(expr);
+                                self.syms[index].flags = SymFlags::EQU;
                             } else {
                                 // we couldn't evaluate this yet, so remove it
                                 self.syms.pop();
@@ -1857,7 +1862,7 @@ impl<'a> Asm<'a> {
                 let expr = self.const_expr(expr)?;
                 if !self.emit {
                     self.syms
-                        .push(Sym::new(label, Expr::Const(size), unit, section, pos));
+                        .push(Sym::new(label, Expr::Const(size), unit, section, pos, 0));
                 }
                 size += expr;
             }
@@ -1865,7 +1870,7 @@ impl<'a> Asm<'a> {
         }
         if !self.emit {
             self.syms
-                .push(Sym::new(label, Expr::Const(size), unit, section, pos));
+                .push(Sym::new(label, Expr::Const(size), unit, section, pos, 0));
         }
         Ok(())
     }

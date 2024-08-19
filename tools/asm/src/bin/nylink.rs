@@ -5,7 +5,7 @@ use std::{
     collections::HashMap,
     error::Error,
     fs::{self, File},
-    io::{self, ErrorKind, Read, Write},
+    io::{self, BufWriter, ErrorKind, Read, Write},
     mem,
     path::PathBuf,
     process::ExitCode,
@@ -14,7 +14,8 @@ use std::{
 use clap::Parser;
 use indexmap::IndexMap;
 use nyasm::{
-    Expr, ExprNode, Label, Op, Pos, Reloc, RelocVal, Section, SliceInterner, StrInterner, Sym, Tok,
+    Expr, ExprNode, Label, Op, Pos, Reloc, RelocVal, Section, SliceInterner, StrInterner, Sym,
+    SymFlags, Tok,
 };
 use serde::{de, Deserialize, Deserializer};
 use serde_derive::{Deserialize, Serialize};
@@ -34,7 +35,7 @@ struct Args {
     #[arg(short, long)]
     output: Option<PathBuf>,
 
-    /// Output file for `SYM` debug symbol file
+    /// Output file for `MSL` debug symbol file
     #[arg(short = 'g', long)]
     debug: Option<PathBuf>,
 
@@ -88,6 +89,7 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
                 line: 1,
                 column: 1,
             },
+            SymFlags::EQU,
         ));
     }
 
@@ -214,6 +216,7 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
                     line: 1,
                     column: 1,
                 },
+                SymFlags::EQU,
             ));
             let size = ld.str_int.intern(&format!("__{name}_SIZE__"));
             syms.push(Sym::new(
@@ -226,6 +229,7 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
                     line: 1,
                     column: 1,
                 },
+                SymFlags::EQU,
             ));
         }
     }
@@ -335,14 +339,14 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
     }
 
     let mut output: Box<dyn Write> = match args.output {
-        Some(path) => Box::new(
+        Some(path) => Box::new(BufWriter::new(
             File::options()
                 .write(true)
                 .create(true)
                 .truncate(true)
                 .open(path)
                 .map_err(|e| format!("cant open file: {e}"))?,
-        ),
+        )),
         None => Box::new(io::stdout()),
     };
 
@@ -371,7 +375,6 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
         }
     }
 
-    // TODO: new symbols format
     if let Some(path) = args.debug {
         tracing::trace!("writing debug symbols");
         let mut file = File::options()
@@ -381,16 +384,11 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
             .open(path)
             .map_err(|e| format!("cant open file: {e}"))?;
         for sym in &ld.syms {
-            // TODO: skip EQUs ?
+            if (sym.flags & SymFlags::EQU) != 0 {
+                continue;
+            }
             if let Expr::Const(value) = sym.value {
-                let tags = &config.sections[sym.section].tags.as_ref();
-                if let Some(tags) = tags {
-                    if let Some(bank) = tags.get("bank") {
-                        writeln!(file, "{bank:02X}:{value:04X} {}", sym.label.to_string())?;
-                        continue;
-                    }
-                }
-                writeln!(file, "{value:04X} {}", sym.label.to_string())?;
+                writeln!(file, "{value:06X} {}", sym.label.to_string())?;
             }
         }
     }
@@ -675,6 +673,7 @@ impl<'a> Ld<'a> {
                 line: line as usize,
                 column: column as usize,
             };
+            let flags: u8 = self.read_int(&mut reader)?;
             // duplicate exported symbol?
             if let Some(other) = self
                 .syms
@@ -684,7 +683,7 @@ impl<'a> Ld<'a> {
                 return Err(self.err_in(file, &format!("duplicate exported symbol \"{label}\" found\n\tdefined at {}:{}:{}\n\tagain at {sym_file}:{line}:{column}", other.pos.file, other.pos.line, other.pos.column)));
             }
             self.syms
-                .push(Sym::new(label, value, unit, sym_section, pos));
+                .push(Sym::new(label, value, unit, sym_section, pos, flags));
         }
         // add to sections
         let sections_len: u32 = self.read_int(&mut reader)?;

@@ -209,6 +209,12 @@ impl<'a> Section<'a> {
     }
 }
 
+pub struct SymFlags;
+
+impl SymFlags {
+    pub const EQU: u8 = 1 << 0;
+}
+
 #[derive(Debug)]
 pub struct Sym<'a> {
     pub label: Label<'a>,
@@ -216,6 +222,7 @@ pub struct Sym<'a> {
     pub unit: &'a str,
     pub section: &'a str,
     pub pos: Pos<'a>,
+    pub flags: u8,
 }
 
 impl<'a> Sym<'a> {
@@ -225,6 +232,7 @@ impl<'a> Sym<'a> {
         unit: &'a str,
         section: &'a str,
         pos: Pos<'a>,
+        flags: u8,
     ) -> Self {
         Self {
             label,
@@ -232,6 +240,7 @@ impl<'a> Sym<'a> {
             unit,
             section,
             pos,
+            flags,
         }
     }
 }
