@@ -3,16 +3,19 @@
 \native \index16 \accum8
 
 \section "HEADER"
+\byte "YO"
+\byte "GAME"
+\byte 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 \byte "SNES GAME            "
 \byte $35       ; Fast ExHiROM
 \byte $02       ; ROM + SRAM + Battery
 \byte 13        ; 2^13 KiB ROM (8 MiB)
 \byte 5         ; 2^5 KiB SRAM (32 KiB)
-\byte 1         ; NTSC
-\byte 0         ; Developer ID
+\byte 1         ; USA
+\byte $33       ; (extended header)
 \byte 0         ; ROM Version
-\word $FFFF     ; Checksum xor $FFFF
-\word 0         ; Checksum
+\word $0000     ; Checksum Complement
+\word $FFFF     ; Checksum
 
 \section "HOME"
 Start:
@@ -21,10 +24,20 @@ Start:
     xce
     rep #$10
     sep #$20
+    cld
+    sei
+
+    ldx #$000200
+
+    jsr Foo
 
     jmp *
 
-\section "VECTOR_LONGJUMP"
+\section "TEST"
+Foo:
+    rts
+
+\section "VECTORJUMP"
 Reset:
     jml @Start
 
@@ -34,22 +47,26 @@ Nmi:
 Irq:
     rti
 
+\macro WORD
+    $FFFF & \1
+\end
+
 \section "VECTORS"
 ; Native Mode Vectors
 \word 0, 0          ; (reserved)
-\word $FFFF & Reset ; COP
-\word $FFFF & Reset ; BRK
+\word WORD Reset    ; COP
+\word WORD Reset    ; BRK
 \word 0             ; ABORT (unused)
-\word $FFFF & Nmi   ; NMI
+\word WORD Nmi      ; NMI
 \word 0             ; (reserved)
-\word $FFFF & Irq   ; IRQ
+\word WORD Irq      ; IRQ
 
 ; Emulation Mode Vectors
 \word 0, 0          ; (reserved)
-\word $FFFF & Reset ; COP
+\word WORD Reset    ; COP
 \word 0             ; (reserved)
 \word 0             ; ABORT (unused)
-\word $FFFF & Nmi   ; SMI
-\word $FFFF & Reset ; RESET
-\word $FFFF & Irq   ; IRQ
+\word WORD Nmi      ; SMI
+\word WORD Reset    ; RESET
+\word WORD Irq      ; IRQ
 

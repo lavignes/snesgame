@@ -14,8 +14,8 @@ use std::{
 use clap::Parser;
 use indexmap::IndexMap;
 use nyasm::{
-    Expr, ExprNode, Label, Op, Pos, Reloc, RelocVal, Section, SliceInterner, StrInterner, Sym,
-    SymFlags, Tok,
+    Expr, ExprNode, Label, Op, Pos, Reloc, RelocFlags, RelocVal, Section, SliceInterner,
+    StrInterner, Sym, SymFlags, Tok,
 };
 use serde::{de, Deserialize, Deserializer};
 use serde_derive::{Deserialize, Serialize};
@@ -79,18 +79,18 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
     let def_unit = ld.str_int.intern("__EXPORT__");
     for (name, val) in &args.define {
         let string = ld.str_int.intern(name);
-        ld.syms.push(Sym::new(
-            Label::new(None, string),
-            Expr::Const(*val),
-            def_unit,
-            def_file_section,
-            Pos {
+        ld.syms.push(Sym {
+            label: Label::new(None, string),
+            value: Expr::Const(*val),
+            unit: def_unit,
+            section: def_file_section,
+            pos: Pos {
                 file: def_file_section,
                 line: 1,
                 column: 1,
             },
-            SymFlags::EQU,
-        ));
+            flags: SymFlags::EQU,
+        });
     }
 
     for (name, mem) in &config.memories {
@@ -206,31 +206,31 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
             let def_file_section = ld.str_int.intern("__DEFINES__");
             let def_unit = ld.str_int.intern("__EXPORT__");
             let start = ld.str_int.intern(&format!("__{name}_START__"));
-            syms.push(Sym::new(
-                Label::new(None, start),
-                Expr::Const(section.pc as i32),
-                def_unit,
-                def_file_section,
-                Pos {
+            syms.push(Sym {
+                label: Label::new(None, start),
+                value: Expr::Const(section.pc as i32),
+                unit: def_unit,
+                section: def_file_section,
+                pos: Pos {
                     file: def_file_section,
                     line: 1,
                     column: 1,
                 },
-                SymFlags::EQU,
-            ));
+                flags: SymFlags::EQU,
+            });
             let size = ld.str_int.intern(&format!("__{name}_SIZE__"));
-            syms.push(Sym::new(
-                Label::new(None, size),
-                Expr::Const(section_size as i32),
-                def_unit,
-                def_file_section,
-                Pos {
+            syms.push(Sym {
+                label: Label::new(None, size),
+                value: Expr::Const(section_size as i32),
+                unit: def_unit,
+                section: def_file_section,
+                pos: Pos {
                     file: def_file_section,
                     line: 1,
                     column: 1,
                 },
-                SymFlags::EQU,
-            ));
+                flags: SymFlags::EQU,
+            });
         }
     }
 
@@ -308,13 +308,27 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
                 }
                 2 => {
                     if (value as u32) > (u16::MAX as u32) {
-                        Err(ld.err_in(
-                            reloc.unit,
-                            &format!(
-                                "expression >2 bytes\n\tdefined at {}:{}:{}",
-                                reloc.pos.file, reloc.pos.line, reloc.pos.column
-                            ),
-                        ))?;
+                        // ABS JMP-type relocations are OK if they are the same bank
+                        if (reloc.flags & RelocFlags::ABS_JMP) != 0 {
+                            let bank = ld.sections[i].pc >> 16;
+                            if ((value as u32) >> 16) != bank {
+                                Err(ld.err_in(
+                                    reloc.unit,
+                                    &format!(
+                                        "expression >2 bytes\n\tdefined at {}:{}:{}",
+                                        reloc.pos.file, reloc.pos.line, reloc.pos.column
+                                    ),
+                                ))?;
+                            }
+                        } else {
+                            Err(ld.err_in(
+                                reloc.unit,
+                                &format!(
+                                    "expression >2 bytes\n\tdefined at {}:{}:{}",
+                                    reloc.pos.file, reloc.pos.line, reloc.pos.column
+                                ),
+                            ))?;
+                        }
                     }
                     ld.sections[i].data[reloc.offset] = ((value as u32) >> 0) as u8;
                     ld.sections[i].data[reloc.offset + 1] = ((value as u32) >> 8) as u8;
@@ -682,8 +696,14 @@ impl<'a> Ld<'a> {
             {
                 return Err(self.err_in(file, &format!("duplicate exported symbol \"{label}\" found\n\tdefined at {}:{}:{}\n\tagain at {sym_file}:{line}:{column}", other.pos.file, other.pos.line, other.pos.column)));
             }
-            self.syms
-                .push(Sym::new(label, value, unit, sym_section, pos, flags));
+            self.syms.push(Sym {
+                label,
+                value,
+                unit,
+                section: sym_section,
+                pos,
+                flags,
+            });
         }
         // add to sections
         let sections_len: u32 = self.read_int(&mut reader)?;
@@ -773,12 +793,14 @@ impl<'a> Ld<'a> {
                     line: line as usize,
                     column: column as usize,
                 };
+                let flags: u8 = self.read_int(&mut reader)?;
                 relocs.push(Reloc {
                     offset,
                     width,
                     value,
                     unit,
                     pos,
+                    flags,
                 });
             }
             // extend section

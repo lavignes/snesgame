@@ -15,8 +15,8 @@ use std::{
 
 use clap::Parser;
 use nyasm::{
-    Expr, ExprNode, Label, Op, Pos, Reloc, RelocVal, Section, SliceInterner, StrInterner, Sym,
-    SymFlags, Tok,
+    Expr, ExprNode, Label, Op, Pos, Reloc, RelocFlags, RelocVal, Section, SliceInterner,
+    StrInterner, Sym, SymFlags, Tok,
 };
 use tracing::Level;
 
@@ -74,18 +74,18 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
     let def_unit = asm.str_int.intern("__STATIC__");
     for (name, val) in &args.define {
         let string = asm.str_int.intern(name);
-        asm.syms.push(Sym::new(
-            Label::new(None, string),
-            Expr::Const(*val),
-            def_unit,
-            def_file_section,
-            Pos {
+        asm.syms.push(Sym {
+            label: Label::new(None, string),
+            value: Expr::Const(*val),
+            unit: def_unit,
+            section: def_file_section,
+            pos: Pos {
                 file: def_file_section,
                 line: 1,
                 column: 1,
             },
-            SymFlags::EQU,
-        ));
+            flags: SymFlags::EQU,
+        });
     }
 
     tracing::trace!("starting pass 1");
@@ -274,6 +274,7 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
                 output.write_all(&(reloc.pos.file.len() as u32).to_le_bytes())?;
                 output.write_all(&(reloc.pos.line as u32).to_le_bytes())?;
                 output.write_all(&(reloc.pos.column as u32).to_le_bytes())?;
+                output.write_all(&[reloc.flags])?;
             }
         }
     }
@@ -452,8 +453,14 @@ impl<'a> Asm<'a> {
                         let index = self.syms.len();
                         let unit = self.str_int.intern("__STATIC__");
                         let section = self.sections[self.section].name;
-                        self.syms
-                            .push(Sym::new(label, Expr::Const(0), unit, section, pos, 0));
+                        self.syms.push(Sym {
+                            label,
+                            value: Expr::Const(0),
+                            unit,
+                            section,
+                            pos,
+                            flags: 0,
+                        });
                         index
                     };
 
@@ -965,7 +972,7 @@ impl<'a> Asm<'a> {
         Ok(())
     }
 
-    fn reloc(&mut self, offset: usize, width: u8, expr: Expr<'a>, pos: Pos<'a>) {
+    fn reloc(&mut self, offset: usize, width: u8, expr: Expr<'a>, pos: Pos<'a>, flags: u8) {
         let pc = self.pc() as usize;
         let offset = pc + offset;
         let value = match expr {
@@ -980,6 +987,7 @@ impl<'a> Asm<'a> {
             value,
             unit,
             pos,
+            flags,
         });
     }
 
@@ -1031,14 +1039,14 @@ impl<'a> Asm<'a> {
                             self.write(&self.range_8(value)?.to_le_bytes());
                         } else {
                             self.write(&[0xFD]);
-                            self.reloc(1, 1, expr, pos);
+                            self.reloc(1, 1, expr, pos, 0);
                         }
                     } else {
                         if let Ok(value) = self.const_expr(expr) {
                             self.write(&self.range_16(value)?.to_le_bytes());
                         } else {
                             self.write(&[0xFD, 0xFD]);
-                            self.reloc(1, 2, expr, pos);
+                            self.reloc(1, 2, expr, pos, 0);
                         }
                     }
                 }
@@ -1090,7 +1098,7 @@ impl<'a> Asm<'a> {
                                 self.write(&self.range_16(value)?.to_le_bytes());
                             } else {
                                 self.write(&[0xFD, 0xFD]);
-                                self.reloc(1, 2, expr, pos);
+                                self.reloc(1, 2, expr, pos, 0);
                             }
                         }
                         return self.add_pc(3);
@@ -1135,7 +1143,7 @@ impl<'a> Asm<'a> {
                                 self.write(&self.range_16(value)?.to_le_bytes());
                             } else {
                                 self.write(&[0xFD, 0xFD]);
-                                self.reloc(1, 2, expr, pos);
+                                self.reloc(1, 2, expr, pos, 0);
                             }
                         }
                         return self.add_pc(3);
@@ -1186,7 +1194,7 @@ impl<'a> Asm<'a> {
                         self.write(&self.range_16(value)?.to_le_bytes());
                     } else {
                         self.write(&[0xFD, 0xFD]);
-                        self.reloc(1, 2, expr, pos);
+                        self.reloc(1, 2, expr, pos, 0);
                     }
                 }
                 return self.add_pc(3);
@@ -1205,13 +1213,13 @@ impl<'a> Asm<'a> {
                             self.write(&self.range_8(value)?.to_le_bytes());
                         } else {
                             self.write(&[0xFD]);
-                            self.reloc(1, 1, src, src_pos);
+                            self.reloc(1, 1, src, src_pos, 0);
                         }
                         if let Ok(value) = self.const_expr(dst) {
                             self.write(&self.range_8(value)?.to_le_bytes());
                         } else {
                             self.write(&[0xFD]);
-                            self.reloc(2, 1, dst, dst_pos);
+                            self.reloc(2, 1, dst, dst_pos, 0);
                         }
                     }
                     return self.add_pc(3);
@@ -1424,7 +1432,7 @@ impl<'a> Asm<'a> {
                                 if self.emit {
                                     self.write(&[op]);
                                     self.write(&[0xFD, 0xFD]);
-                                    self.reloc(1, 2, expr, pos);
+                                    self.reloc(1, 2, expr, pos, 0);
                                 }
                                 return self.add_pc(3);
                             }
@@ -1433,16 +1441,23 @@ impl<'a> Asm<'a> {
                             if self.emit {
                                 self.write(&[op]);
                                 self.write(&[0xFD, 0xFD]);
-                                self.reloc(1, 2, expr, pos);
+                                self.reloc(1, 2, expr, pos, 0);
                             }
                             return self.add_pc(3);
                         }
                         // ABS
                         let op = self.check_opcode(mne.1, Addr::ABS)?;
                         if self.emit {
+                            // At link time, we want to allow JMPs within the
+                            // same program bank.
+                            let flags = if matches!(mne.0, Mne::JMP | Mne::JSR) {
+                                RelocFlags::ABS_JMP
+                            } else {
+                                0
+                            };
                             self.write(&[op]);
                             self.write(&[0xFD, 0xFD]);
-                            self.reloc(1, 2, expr, pos);
+                            self.reloc(1, 2, expr, pos, flags);
                         }
                         return self.add_pc(3);
                     }
@@ -1460,7 +1475,7 @@ impl<'a> Asm<'a> {
                                         self.write(&self.range_16(value)?.to_le_bytes());
                                     } else {
                                         self.write(&[0xFD, 0xFD]);
-                                        self.reloc(1, 2, expr, pos);
+                                        self.reloc(1, 2, expr, pos, 0);
                                     }
                                 }
                                 return self.add_pc(3);
@@ -1473,7 +1488,7 @@ impl<'a> Asm<'a> {
                                     self.write(&self.range_16(value)?.to_le_bytes());
                                 } else {
                                     self.write(&[0xFD, 0xFD]);
-                                    self.reloc(1, 2, expr, pos);
+                                    self.reloc(1, 2, expr, pos, 0);
                                 }
                             }
                             return self.add_pc(3);
@@ -1485,8 +1500,15 @@ impl<'a> Asm<'a> {
                             if let Ok(value) = self.const_expr(expr) {
                                 self.write(&self.range_16(value)?.to_le_bytes());
                             } else {
+                                // At link time, we want to allow JMPs within the
+                                // same program bank.
+                                let flags = if matches!(mne.0, Mne::JMP | Mne::JSR) {
+                                    RelocFlags::ABS_JMP
+                                } else {
+                                    0
+                                };
                                 self.write(&[0xFD, 0xFD]);
-                                self.reloc(1, 2, expr, pos);
+                                self.reloc(1, 2, expr, pos, flags);
                             }
                         }
                         return self.add_pc(3);
@@ -1503,7 +1525,7 @@ impl<'a> Asm<'a> {
                                     self.write(&self.range_24(value)?.to_le_bytes());
                                 } else {
                                     self.write(&[0xFD, 0xFD, 0xFD]);
-                                    self.reloc(1, 3, expr, pos);
+                                    self.reloc(1, 3, expr, pos, 0);
                                 }
                             }
                             return self.add_pc(4);
@@ -1516,7 +1538,7 @@ impl<'a> Asm<'a> {
                                 self.write(&self.range_24(value)?.to_le_bytes());
                             } else {
                                 self.write(&[0xFD, 0xFD, 0xFd]);
-                                self.reloc(1, 3, expr, pos);
+                                self.reloc(1, 3, expr, pos, 0);
                             }
                         }
                         return self.add_pc(4);
@@ -1545,7 +1567,7 @@ impl<'a> Asm<'a> {
                                 self.write(&self.range_8(value)?.to_le_bytes());
                             } else {
                                 self.write(&[0x0FD]);
-                                self.reloc(0, 1, expr, pos);
+                                self.reloc(0, 1, expr, pos, 0);
                             }
                         }
                         self.add_pc(1)?;
@@ -1567,7 +1589,7 @@ impl<'a> Asm<'a> {
                             self.write(&self.range_16(value)?.to_le_bytes());
                         } else {
                             self.write(&[0xFD, 0xFD]);
-                            self.reloc(0, 2, expr, pos);
+                            self.reloc(0, 2, expr, pos, 0);
                         }
                     }
                     self.add_pc(2)?;
@@ -1588,7 +1610,7 @@ impl<'a> Asm<'a> {
                             self.write(&self.range_24(value)?.to_le_bytes());
                         } else {
                             self.write(&[0xFD, 0xFD, 0xFD]);
-                            self.reloc(0, 3, expr, pos);
+                            self.reloc(0, 3, expr, pos, 0);
                         }
                     }
                     self.add_pc(3)?;
@@ -1685,7 +1707,7 @@ impl<'a> Asm<'a> {
             Tok::MACRO => {
                 self.macrodef()?;
             }
-            Tok::FOR => {
+            Tok::LOOP => {
                 self.forloop()?;
             }
             Tok::STRUCT => {
@@ -1736,12 +1758,12 @@ impl<'a> Asm<'a> {
             // TODO: pos per tok
             let pos = self.tok().pos();
             match self.peek()? {
-                tok @ (Tok::TERM | Tok::NEWLINE | Tok::EOF) => {
+                tok @ (Tok::BREAK | Tok::NEWLINE | Tok::EOF) => {
                     if !arg.is_empty() {
                         let arg = self.tok_int.intern(&arg);
                         args.push_back(arg);
                     }
-                    if tok == Tok::TERM {
+                    if tok == Tok::BREAK {
                         self.eat();
                     }
                     break;
@@ -1785,7 +1807,7 @@ impl<'a> Asm<'a> {
             let mut if_level = 0;
             loop {
                 match self.peek()? {
-                    Tok::IF | Tok::IFDEF | Tok::STRUCT | Tok::MACRO | Tok::FOR => if_level += 1,
+                    Tok::IF | Tok::IFDEF | Tok::STRUCT | Tok::MACRO | Tok::LOOP => if_level += 1,
                     Tok::END => {
                         if if_level == 0 {
                             self.eat();
@@ -1861,16 +1883,28 @@ impl<'a> Asm<'a> {
                 let expr = self.expr()?;
                 let expr = self.const_expr(expr)?;
                 if !self.emit {
-                    self.syms
-                        .push(Sym::new(label, Expr::Const(size), unit, section, pos, 0));
+                    self.syms.push(Sym {
+                        label,
+                        value: Expr::Const(size),
+                        unit,
+                        section,
+                        pos,
+                        flags: 0,
+                    });
                 }
                 size += expr;
             }
             self.eol()?;
         }
         if !self.emit {
-            self.syms
-                .push(Sym::new(label, Expr::Const(size), unit, section, pos, 0));
+            self.syms.push(Sym {
+                label,
+                value: Expr::Const(size),
+                unit,
+                section,
+                pos,
+                flags: 0,
+            });
         }
         Ok(())
     }
@@ -1888,11 +1922,12 @@ impl<'a> Asm<'a> {
         let label = Label::new(None, string);
         // TODO: check if macro is already defined
         // if we are in the emit pass then its safe to skip
+        self.eol()?;
         let mut toks = Vec::new();
         let mut if_level = 0;
         loop {
             match self.peek()? {
-                Tok::IF | Tok::IFDEF | Tok::STRUCT | Tok::MACRO | Tok::FOR => if_level += 1,
+                Tok::IF | Tok::IFDEF | Tok::STRUCT | Tok::MACRO | Tok::LOOP => if_level += 1,
                 Tok::END => {
                     if if_level == 0 {
                         self.eat();
@@ -1929,7 +1964,7 @@ impl<'a> Asm<'a> {
                             _ => return Err(self.err("invalid \\JOIN input")),
                         }
                         self.eat();
-                        if self.peek()? == Tok::TERM {
+                        if self.peek()? == Tok::BREAK {
                             self.eat();
                             break;
                         }
@@ -1974,7 +2009,7 @@ impl<'a> Asm<'a> {
         let mut if_level = 0;
         loop {
             match self.peek()? {
-                Tok::IF | Tok::IFDEF | Tok::STRUCT | Tok::MACRO | Tok::FOR => if_level += 1,
+                Tok::IF | Tok::IFDEF | Tok::STRUCT | Tok::MACRO | Tok::LOOP => if_level += 1,
                 Tok::END => {
                     if if_level == 0 {
                         self.eat();
@@ -2006,7 +2041,7 @@ impl<'a> Asm<'a> {
                             _ => return Err(self.err("invalid \\JOIN input")),
                         }
                         self.eat();
-                        if self.peek()? == Tok::TERM {
+                        if self.peek()? == Tok::BREAK {
                             self.eat();
                             break;
                         }
@@ -2297,7 +2332,7 @@ const DIRECTIVES: &[(&'static str, Tok)] = &[
     ("END", Tok::END),
     ("RES", Tok::RES),
     ("MACRO", Tok::MACRO),
-    ("FOR", Tok::FOR),
+    ("LOOP", Tok::LOOP),
     ("FAIL", Tok::FAIL),
     ("STRUCT", Tok::STRUCT),
     ("TAG", Tok::TAG),
@@ -2312,7 +2347,7 @@ const DIRECTIVES: &[(&'static str, Tok)] = &[
     ("SHIFT", Tok::SHIFT),
     ("UNIQ", Tok::UNIQ),
     ("JOIN", Tok::JOIN),
-    ("TERM", Tok::TERM),
+    ("BREAK", Tok::BREAK),
 ];
 
 const DIGRAPHS: &[(&[u8; 2], Tok)] = &[

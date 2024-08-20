@@ -175,6 +175,12 @@ pub enum ExprNode<'a> {
     Tag(Label<'a>, &'a str),
 }
 
+pub struct RelocFlags;
+
+impl RelocFlags {
+    pub const ABS_JMP: u8 = 1 << 0;
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum RelocVal<'a> {
     Addr(&'a str, u32),
@@ -188,6 +194,7 @@ pub struct Reloc<'a> {
     pub value: RelocVal<'a>,
     pub unit: &'a str,
     pub pos: Pos<'a>,
+    pub flags: u8,
 }
 
 #[derive(Debug)]
@@ -223,26 +230,6 @@ pub struct Sym<'a> {
     pub section: &'a str,
     pub pos: Pos<'a>,
     pub flags: u8,
-}
-
-impl<'a> Sym<'a> {
-    pub fn new(
-        label: Label<'a>,
-        value: Expr<'a>,
-        unit: &'a str,
-        section: &'a str,
-        pos: Pos<'a>,
-        flags: u8,
-    ) -> Self {
-        Self {
-            label,
-            value,
-            unit,
-            section,
-            pos,
-            flags,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -332,7 +319,7 @@ impl Tok {
     pub const END: Self = Self(0x98);
     pub const RES: Self = Self(0x99);
     pub const MACRO: Self = Self(0x9A);
-    pub const FOR: Self = Self(0x9B);
+    pub const LOOP: Self = Self(0x9B);
     pub const FAIL: Self = Self(0x9C);
     pub const STRUCT: Self = Self(0x9D);
     pub const TAG: Self = Self(0x9E);
@@ -350,7 +337,7 @@ impl Tok {
     pub const SHIFT: Self = Self(0xB2);
     pub const UNIQ: Self = Self(0xB3);
     pub const JOIN: Self = Self(0xB4);
-    pub const TERM: Self = Self(0xB5);
+    pub const BREAK: Self = Self(0xB5);
 
     pub const ASL: Self = Self(0xC0); // <<
     pub const ASR: Self = Self(0xC1); // >>
