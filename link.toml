@@ -1,5 +1,6 @@
 [MEMORY]
 ZEROPAGE = { start = "$000000", size = "$100", type = "rw" }
+STACK = { start = "$000100", size = "$100", type = "rw" }
 LORAM = { start = "$000200", size = "$1800", type = "rw" }
 
 FASTROM = { start = "$C00000", size = "$400000", type = "ro", fill = "$00" }
@@ -16,7 +17,6 @@ ZEROPAGE = { load = "ZEROPAGE", type = "bss" }
 LORAM = { load = "LORAM", type = "bss" }
 
 HOME = { load = "FASTROM", type = "ro" }
-TEST = { load = "FASTROM", type = "ro" }
 
 # Mesen-S is dumb and checks for vectors to jump to > $408000 in ExHiROM
 VECTORJUMP = { load = "SLOWROM1", type = "ro" }
