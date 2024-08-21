@@ -343,6 +343,15 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
                             ),
                         ))?;
                     }
+                    if (reloc.flags & RelocFlags::L_JMP) != 0 {
+                        let bank = ld.sections[i].pc >> 16;
+                        if ((value as u32) >> 16) == bank {
+                            tracing::warn!(
+                                "long jump within same bank\n\tdefined at {}:{}:{}",
+                                reloc.pos.file, reloc.pos.line, reloc.pos.column
+                            );
+                        }
+                    }
                     ld.sections[i].data[reloc.offset] = ((value as u32) >> 0) as u8;
                     ld.sections[i].data[reloc.offset + 1] = ((value as u32) >> 8) as u8;
                     ld.sections[i].data[reloc.offset + 2] = ((value as u32) >> 16) as u8;
