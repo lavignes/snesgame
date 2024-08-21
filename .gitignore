@@ -1,0 +1,8 @@
+# object files
+*.o
+
+# dep files
+*.d
+
+# outputs
+/game.*
