@@ -1551,8 +1551,15 @@ impl<'a> Asm<'a> {
                             if let Ok(value) = self.const_expr(expr) {
                                 self.write(&self.range_24(value)?.to_le_bytes());
                             } else {
+                                // At link time, we want to warn on JMLs within the
+                                // same program bank.
+                                let flags = if matches!(mne.0, Mne::JML | Mne::JSL) {
+                                    RelocFlags::L_JMP
+                                } else {
+                                    0
+                                };
                                 self.write(&[0xFD, 0xFD, 0xFd]);
-                                self.reloc(1, 3, expr, pos, 0);
+                                self.reloc(1, 3, expr, pos, flags);
                             }
                         }
                         return self.add_pc(4);
