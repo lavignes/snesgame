@@ -1097,8 +1097,15 @@ impl<'a> Asm<'a> {
                             if let Ok(value) = self.const_expr(expr) {
                                 self.write(&self.range_16(value)?.to_le_bytes());
                             } else {
+                                // At link time, we want to allow JMPs within the
+                                // same program bank.
+                                let flags = if matches!(mne.0, Mne::JMP | Mne::JSR) {
+                                    RelocFlags::ABS_JMP
+                                } else {
+                                    0
+                                };
                                 self.write(&[0xFD, 0xFD]);
-                                self.reloc(1, 2, expr, pos, 0);
+                                self.reloc(1, 2, expr, pos, flags);
                             }
                         }
                         return self.add_pc(3);
@@ -1142,8 +1149,15 @@ impl<'a> Asm<'a> {
                             if let Ok(value) = self.const_expr(expr) {
                                 self.write(&self.range_16(value)?.to_le_bytes());
                             } else {
+                                // At link time, we want to allow JMPs within the
+                                // same program bank.
+                                let flags = if matches!(mne.0, Mne::JMP | Mne::JSR) {
+                                    RelocFlags::ABS_JMP
+                                } else {
+                                    0
+                                };
                                 self.write(&[0xFD, 0xFD]);
-                                self.reloc(1, 2, expr, pos, 0);
+                                self.reloc(1, 2, expr, pos, flags);
                             }
                         }
                         return self.add_pc(3);
