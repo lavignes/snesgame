@@ -2,9 +2,9 @@
 
 \include "registers.inc"
 
+\section "CORE"
 \native \index16 \accum8
 
-\section "HOME"
 Start::
     sei
     cld

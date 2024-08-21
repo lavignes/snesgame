@@ -3,7 +3,7 @@
 ;; Screen Display (W)
 ;;
 ;; Fields: f...bbbb
-;; f    - Force Blank
+;; f    - Force VBlank
 ;; bbbb - Brightness
 ;;
 INIDISP = $2100
