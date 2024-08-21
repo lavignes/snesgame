@@ -179,6 +179,7 @@ pub struct RelocFlags;
 
 impl RelocFlags {
     pub const ABS_JMP: u8 = 1 << 0;
+    pub const L_JMP: u8 = 1 << 1;
 }
 
 #[derive(Debug, Clone, Copy)]
