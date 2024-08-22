@@ -183,8 +183,9 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
             tracing::warn!("section \"{}\" is larger than 65536 bytes", section.name);
         }
         let start_bank = (section.pc & 0xFF0000) >> 16;
-        let end_bank = ((section.pc + section_size) & 0xFF0000) >> 16;
-        if start_bank != end_bank {
+        let end_address = section.pc + section_size;
+        let end_bank = (end_address & 0xFF0000) >> 16;
+        if ((end_address & 0xFFFF) != 0) && (start_bank != end_bank) {
             tracing::warn!(
                 "section \"{}\" starts in bank ${start_bank:02X} and ends in bank ${end_bank:02X}",
                 section.name
@@ -348,7 +349,9 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
                         if ((value as u32) >> 16) == bank {
                             tracing::warn!(
                                 "long jump within same bank\n\tdefined at {}:{}:{}",
-                                reloc.pos.file, reloc.pos.line, reloc.pos.column
+                                reloc.pos.file,
+                                reloc.pos.line,
+                                reloc.pos.column
                             );
                         }
                     }

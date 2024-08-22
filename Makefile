@@ -9,7 +9,7 @@ SRCS := $(call rwildcard,src,*.asm)
 OBJS := $(SRCS:.asm=.o)
 DEPS := $(SRCS:.asm=.d)
 
-LOG_LEVEL := ERROR
+LOG_LEVEL := WARN
 ASM_FLAGS := -DDEBUG=1 -l $(LOG_LEVEL) -I include
 LD_FLAGS := -c link.toml -l $(LOG_LEVEL) -g game.sym --tags game.tags
 
