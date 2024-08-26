@@ -1054,164 +1054,309 @@ impl<'a> Asm<'a> {
             }
             Tok::LPAREN => {
                 self.eat();
-                let abs = self.peek()? == Tok::PIPE;
-                if abs {
-                    self.eat();
-                }
+                let length = match self.peek()? {
+                    Tok::LT => {
+                        self.eat();
+                        Length::DP
+                    }
+                    Tok::PIPE => {
+                        self.eat();
+                        Length::ABS
+                    }
+                    _ => Length::None,
+                };
                 let pos = self.tok().pos();
                 let expr = self.expr()?;
-                match self.peek()? {
-                    // IDP, IDY, or IAB?
-                    Tok::RPAREN => {
-                        self.eat();
-                        // IDY
-                        if !abs {
-                            if self.peek()? == Tok::COMMA {
-                                let op = self.check_opcode(mne.1, Addr::IDY)?;
+                match length {
+                    Length::None => {
+                        match self.peek()? {
+                            // IDP, IDY, or IAB?
+                            Tok::RPAREN => {
                                 self.eat();
-                                self.expect(Tok::Y)?;
-                                if self.emit {
-                                    self.write(&[op]);
-                                    let value = self.const_expr(expr)?;
-                                    self.write(&self.range_8(value)?.to_le_bytes());
+                                // IDY?
+                                if self.peek()? == Tok::COMMA {
+                                    let op = self.check_opcode(mne.1, Addr::IDY)?;
+                                    self.eat();
+                                    self.expect(Tok::Y)?;
+                                    if self.emit {
+                                        self.write(&[op]);
+                                        let value = self.const_expr(expr)?;
+                                        self.write(&self.range_8(value)?.to_le_bytes());
+                                    }
+                                    return self.add_pc(2);
                                 }
-                                return self.add_pc(2);
-                            }
-                            // IDP?
-                            if let Ok(value) = self.const_expr(expr) {
-                                if let Ok(byte) = self.range_8(value) {
-                                    if let Ok(op) = self.check_opcode(mne.1, Addr::IDP) {
-                                        if self.emit {
-                                            self.write(&[op]);
-                                            self.write(&byte.to_le_bytes());
+                                // IDP?
+                                if let Ok(value) = self.const_expr(expr) {
+                                    if let Ok(byte) = self.range_8(value) {
+                                        if let Ok(op) = self.check_opcode(mne.1, Addr::IDP) {
+                                            if self.emit {
+                                                self.write(&[op]);
+                                                self.write(&byte.to_le_bytes());
+                                            }
+                                            return self.add_pc(2);
                                         }
-                                        return self.add_pc(2);
                                     }
                                 }
+                                // IAB
+                                let op = self.check_opcode(mne.1, Addr::IAB)?;
+                                if self.emit {
+                                    self.write(&[op]);
+                                    if let Ok(value) = self.const_expr(expr) {
+                                        self.write(&self.range_16(value)?.to_le_bytes());
+                                    } else {
+                                        // At link time, we want to allow JMPs within the
+                                        // same program bank.
+                                        let flags = if matches!(mne.0, Mne::JMP | Mne::JSR) {
+                                            RelocFlags::ABS_JMP
+                                        } else {
+                                            0
+                                        };
+                                        self.write(&[0xFD, 0xFD]);
+                                        self.reloc(1, 2, expr, pos, flags);
+                                    }
+                                }
+                                return self.add_pc(3);
                             }
+                            // IDX, ISY, or IAX?
+                            _ => {
+                                self.eat();
+                                self.expect(Tok::COMMA)?;
+                                // ISY?
+                                if self.peek()? == Tok::S {
+                                    let op = self.check_opcode(mne.1, Addr::ISY)?;
+                                    self.eat();
+                                    self.expect(Tok::RPAREN)?;
+                                    self.expect(Tok::COMMA)?;
+                                    self.expect(Tok::Y)?;
+                                    if self.emit {
+                                        self.write(&[op]);
+                                        let value = self.const_expr(expr)?;
+                                        self.write(&self.range_8(value)?.to_le_bytes());
+                                    }
+                                    return self.add_pc(2);
+                                }
+                                // IDX?
+                                if let Ok(value) = self.const_expr(expr) {
+                                    if let Ok(byte) = self.range_8(value) {
+                                        if let Ok(op) = self.check_opcode(mne.1, Addr::IDX) {
+                                            self.expect(Tok::X)?;
+                                            self.expect(Tok::RPAREN)?;
+                                            if self.emit {
+                                                self.write(&[op]);
+                                                self.write(&byte.to_le_bytes());
+                                            }
+                                            return self.add_pc(2);
+                                        }
+                                    }
+                                }
+                                // IAX
+                                let op = self.check_opcode(mne.1, Addr::IAX)?;
+                                self.expect(Tok::X)?;
+                                self.expect(Tok::RPAREN)?;
+                                if self.emit {
+                                    self.write(&[op]);
+                                    if let Ok(value) = self.const_expr(expr) {
+                                        self.write(&self.range_16(value)?.to_le_bytes());
+                                    } else {
+                                        // At link time, we want to allow JMPs within the
+                                        // same program bank.
+                                        let flags = if matches!(mne.0, Mne::JMP | Mne::JSR) {
+                                            RelocFlags::ABS_JMP
+                                        } else {
+                                            0
+                                        };
+                                        self.write(&[0xFD, 0xFD]);
+                                        self.reloc(1, 2, expr, pos, flags);
+                                    }
+                                }
+                                return self.add_pc(3);
+                            }
+                        }
+                    }
+                    Length::DP => {
+                        // IDX
+                        if self.peek()? == Tok::COMMA {
+                            self.eat();
+                            let op = self.check_opcode(mne.1, Addr::IDX)?;
+                            self.expect(Tok::X)?;
+                            self.expect(Tok::RPAREN)?;
+                            if self.emit {
+                                self.write(&[op]);
+                                if let Ok(value) = self.const_expr(expr) {
+                                    self.write(&self.range_8(value)?.to_le_bytes());
+                                } else {
+                                    self.write(&[0xFD]);
+                                    self.reloc(1, 1, expr, pos, RelocFlags::DP);
+                                }
+                            }
+                            return self.add_pc(2);
+                        }
+                        self.expect(Tok::RPAREN)?;
+                        // IDY?
+                        if self.peek()? == Tok::COMMA {
+                            self.eat();
+                            let op = self.check_opcode(mne.1, Addr::IDY)?;
+                            if self.emit {
+                                self.write(&[op]);
+                                if let Ok(value) = self.const_expr(expr) {
+                                    self.write(&self.range_8(value)?.to_le_bytes());
+                                } else {
+                                    self.write(&[0xFD]);
+                                    self.reloc(1, 1, expr, pos, RelocFlags::DP);
+                                }
+                            }
+                            return self.add_pc(2);
+                        }
+                        // IDP
+                        let op = self.check_opcode(mne.1, Addr::IDP)?;
+                        if self.emit {
+                            self.write(&[op]);
+                            if let Ok(value) = self.const_expr(expr) {
+                                self.write(&self.range_8(value)?.to_le_bytes());
+                            } else {
+                                self.write(&[0xFD]);
+                                self.reloc(1, 1, expr, pos, RelocFlags::DP);
+                            }
+                        }
+                        return self.add_pc(2);
+                    }
+                    Length::ABS => {
+                        // IAX?
+                        if self.peek()? == Tok::COMMA {
+                            self.eat();
+                            let op = self.check_opcode(mne.1, Addr::IAX)?;
+                            self.expect(Tok::X)?;
+                            self.expect(Tok::RPAREN)?;
+                            if self.emit {
+                                self.write(&[op]);
+                                if let Ok(value) = self.const_expr(expr) {
+                                    self.write(&self.range_16(value)?.to_le_bytes());
+                                } else {
+                                    self.write(&[0xFD, 0xFD]);
+                                    self.reloc(1, 2, expr, pos, 0);
+                                }
+                            }
+                            return self.add_pc(3);
                         }
                         // IAB
                         let op = self.check_opcode(mne.1, Addr::IAB)?;
+                        self.expect(Tok::RPAREN)?;
                         if self.emit {
                             self.write(&[op]);
                             if let Ok(value) = self.const_expr(expr) {
                                 self.write(&self.range_16(value)?.to_le_bytes());
                             } else {
-                                // At link time, we want to allow JMPs within the
-                                // same program bank.
-                                let flags = if matches!(mne.0, Mne::JMP | Mne::JSR) {
-                                    RelocFlags::ABS_JMP
-                                } else {
-                                    0
-                                };
                                 self.write(&[0xFD, 0xFD]);
-                                self.reloc(1, 2, expr, pos, flags);
+                                self.reloc(1, 2, expr, pos, 0);
                             }
                         }
                         return self.add_pc(3);
                     }
-                    // IDX, ISY, or IAX?
-                    _ => {
-                        self.eat();
-                        self.expect(Tok::COMMA)?;
-                        if !abs {
-                            // ISY?
-                            if self.peek()? == Tok::S {
-                                let op = self.check_opcode(mne.1, Addr::ISY)?;
-                                self.eat();
-                                self.expect(Tok::RPAREN)?;
-                                self.expect(Tok::COMMA)?;
-                                self.expect(Tok::Y)?;
-                                if self.emit {
-                                    self.write(&[op]);
-                                    let value = self.const_expr(expr)?;
-                                    self.write(&self.range_8(value)?.to_le_bytes());
-                                }
-                                return self.add_pc(2);
-                            }
-                            // IDX?
-                            if let Ok(value) = self.const_expr(expr) {
-                                if let Ok(byte) = self.range_8(value) {
-                                    if let Ok(op) = self.check_opcode(mne.1, Addr::IDX) {
-                                        if self.emit {
-                                            self.write(&[op]);
-                                            self.write(&byte.to_le_bytes());
-                                        }
-                                        return self.add_pc(2);
-                                    }
-                                }
-                            }
-                        }
-                        // IAX
-                        let op = self.check_opcode(mne.1, Addr::IAX)?;
-                        if self.emit {
-                            self.write(&[op]);
-                            if let Ok(value) = self.const_expr(expr) {
-                                self.write(&self.range_16(value)?.to_le_bytes());
-                            } else {
-                                // At link time, we want to allow JMPs within the
-                                // same program bank.
-                                let flags = if matches!(mne.0, Mne::JMP | Mne::JSR) {
-                                    RelocFlags::ABS_JMP
-                                } else {
-                                    0
-                                };
-                                self.write(&[0xFD, 0xFD]);
-                                self.reloc(1, 2, expr, pos, flags);
-                            }
-                        }
-                        return self.add_pc(3);
-                    }
+                    _ => unreachable!(),
                 }
             }
             // IDL, ILY, or IAL?
             Tok::LBRACKET => {
                 self.eat();
-                let abs = self.peek()? == Tok::PIPE;
-                if abs {
-                    self.eat();
-                }
+                let length = match self.peek()? {
+                    Tok::LT => {
+                        self.eat();
+                        Length::DP
+                    }
+                    Tok::PIPE => {
+                        self.eat();
+                        Length::ABS
+                    }
+                    _ => Length::None,
+                };
                 let pos = self.tok().pos();
                 let expr = self.expr()?;
                 self.expect(Tok::RBRACKET)?;
-                if !abs {
-                    // ILY?
-                    if self.peek()? == Tok::COMMA {
-                        let op = self.check_opcode(mne.1, Addr::ILY)?;
-                        self.eat();
-                        self.expect(Tok::Y)?;
+                match length {
+                    Length::None => {
+                        // ILY?
+                        if self.peek()? == Tok::COMMA {
+                            let op = self.check_opcode(mne.1, Addr::ILY)?;
+                            self.eat();
+                            self.expect(Tok::Y)?;
+                            if self.emit {
+                                self.write(&[op]);
+                                let value = self.const_expr(expr)?;
+                                self.write(&self.range_8(value)?.to_le_bytes());
+                            }
+                            return self.add_pc(2);
+                        }
+                        // IDL?
+                        if let Ok(value) = self.const_expr(expr) {
+                            if let Ok(byte) = self.range_8(value) {
+                                if let Ok(op) = self.check_opcode(mne.1, Addr::IDL) {
+                                    if self.emit {
+                                        self.write(&[op]);
+                                        self.write(&byte.to_le_bytes());
+                                    }
+                                    return self.add_pc(2);
+                                }
+                            }
+                        }
+                        // IAL
+                        let op = self.check_opcode(mne.1, Addr::IAL)?;
                         if self.emit {
                             self.write(&[op]);
-                            let value = self.const_expr(expr)?;
-                            self.write(&self.range_8(value)?.to_le_bytes());
+                            if let Ok(value) = self.const_expr(expr) {
+                                self.write(&self.range_16(value)?.to_le_bytes());
+                            } else {
+                                self.write(&[0xFD, 0xFD]);
+                                self.reloc(1, 2, expr, pos, 0);
+                            }
+                        }
+                        return self.add_pc(3);
+                    }
+                    Length::DP => {
+                        // ILY?
+                        if self.peek()? == Tok::COMMA {
+                            let op = self.check_opcode(mne.1, Addr::ILY)?;
+                            self.eat();
+                            self.expect(Tok::Y)?;
+                            if self.emit {
+                                self.write(&[op]);
+                                if let Ok(value) = self.const_expr(expr) {
+                                    self.write(&self.range_8(value)?.to_le_bytes());
+                                } else {
+                                    self.write(&[0xFD]);
+                                    self.reloc(1, 1, expr, pos, RelocFlags::DP);
+                                }
+                            }
+                            return self.add_pc(2);
+                        }
+                        // IDL
+                        let op = self.check_opcode(mne.1, Addr::IDL)?;
+                        if self.emit {
+                            self.write(&[op]);
+                            if let Ok(value) = self.const_expr(expr) {
+                                self.write(&self.range_8(value)?.to_le_bytes());
+                            } else {
+                                self.write(&[0xFD]);
+                                self.reloc(1, 1, expr, pos, RelocFlags::DP);
+                            }
                         }
                         return self.add_pc(2);
                     }
-                    // IDL?
-                    if let Ok(value) = self.const_expr(expr) {
-                        if let Ok(byte) = self.range_8(value) {
-                            if let Ok(op) = self.check_opcode(mne.1, Addr::IDL) {
-                                if self.emit {
-                                    self.write(&[op]);
-                                    self.write(&byte.to_le_bytes());
-                                }
-                                return self.add_pc(2);
+                    Length::ABS => {
+                        // IAL
+                        let op = self.check_opcode(mne.1, Addr::IAL)?;
+                        if self.emit {
+                            self.write(&[op]);
+                            if let Ok(value) = self.const_expr(expr) {
+                                self.write(&self.range_16(value)?.to_le_bytes());
+                            } else {
+                                self.write(&[0xFD, 0xFD]);
+                                self.reloc(1, 2, expr, pos, 0);
                             }
                         }
+                        return self.add_pc(3);
                     }
+                    _ => unreachable!(),
                 }
-                // IAL
-                let op = self.check_opcode(mne.1, Addr::IAL)?;
-                if self.emit {
-                    self.write(&[op]);
-                    if let Ok(value) = self.const_expr(expr) {
-                        self.write(&self.range_16(value)?.to_le_bytes());
-                    } else {
-                        self.write(&[0xFD, 0xFD]);
-                        self.reloc(1, 2, expr, pos, 0);
-                    }
-                }
-                return self.add_pc(3);
             }
             _ => {
                 // BM
@@ -1262,6 +1407,10 @@ impl<'a> Asm<'a> {
                     return self.add_pc(2);
                 }
                 let length = match self.peek()? {
+                    Tok::LT => {
+                        self.eat();
+                        Length::DP
+                    }
                     Tok::PIPE => {
                         self.eat();
                         Length::ABS
@@ -1474,6 +1623,50 @@ impl<'a> Asm<'a> {
                             self.reloc(1, 2, expr, pos, flags);
                         }
                         return self.add_pc(3);
+                    }
+                    Length::DP => {
+                        // DPX, DPY?
+                        if self.peek()? == Tok::COMMA {
+                            self.eat();
+                            if self.peek()? == Tok::X {
+                                self.eat();
+                                let op = self.check_opcode(mne.1, Addr::DPX)?;
+                                if self.emit {
+                                    self.write(&[op]);
+                                    if let Ok(value) = self.const_expr(expr) {
+                                        self.write(&self.range_8(value)?.to_le_bytes());
+                                    } else {
+                                        self.write(&[0xFD]);
+                                        self.reloc(1, 1, expr, pos, RelocFlags::DP);
+                                    }
+                                }
+                                return self.add_pc(2);
+                            }
+                            // DPY
+                            let op = self.check_opcode(mne.1, Addr::DPY)?;
+                            if self.emit {
+                                self.write(&[op]);
+                                if let Ok(value) = self.const_expr(expr) {
+                                    self.write(&self.range_8(value)?.to_le_bytes());
+                                } else {
+                                    self.write(&[0xFD]);
+                                    self.reloc(1, 1, expr, pos, RelocFlags::DP);
+                                }
+                            }
+                            return self.add_pc(2);
+                        }
+                        // DP
+                        let op = self.check_opcode(mne.1, Addr::DP)?;
+                        if self.emit {
+                            self.write(&[op]);
+                            if let Ok(value) = self.const_expr(expr) {
+                                self.write(&self.range_8(value)?.to_le_bytes());
+                            } else {
+                                self.write(&[0xFD]);
+                                self.reloc(1, 1, expr, pos, RelocFlags::DP);
+                            }
+                        }
+                        return self.add_pc(2);
                     }
                     Length::ABS => {
                         // ABX or ABY
@@ -1910,7 +2103,7 @@ impl<'a> Asm<'a> {
                         unit,
                         section,
                         pos,
-                        flags: 0,
+                        flags: SymFlags::EQU,
                     });
                 }
                 size += expr;
@@ -1924,7 +2117,7 @@ impl<'a> Asm<'a> {
                 unit,
                 section,
                 pos,
-                flags: 0,
+                flags: SymFlags::EQU,
             });
         }
         Ok(())
@@ -2097,6 +2290,7 @@ impl<'a> Asm<'a> {
 #[derive(PartialEq, Eq)]
 enum Length {
     None,
+    DP,
     ABS,
     ABL,
 }
@@ -2109,14 +2303,14 @@ impl Addr {
     const IMP: Self = Self(0);  //
     const IMM: Self = Self(1);  // #$00
     const SR: Self = Self(2);   // $00,S
-    const DP: Self = Self(3);   // $00
-    const DPX: Self = Self(4);  // $00,X
-    const DPY: Self = Self(5);  // $00,Y
-    const IDP: Self = Self(6);  // ($00)
-    const IDX: Self = Self(7);  // ($00,X)
-    const IDY: Self = Self(8);  // ($00),Y
-    const IDL: Self = Self(9);  // [$00]
-    const ILY: Self = Self(10); // [$00],Y
+    const DP: Self = Self(3);   // <$00
+    const DPX: Self = Self(4);  // <$00,X
+    const DPY: Self = Self(5);  // <$00,Y
+    const IDP: Self = Self(6);  // (<$00)
+    const IDX: Self = Self(7);  // (<$00,X)
+    const IDY: Self = Self(8);  // (<$00),Y
+    const IDL: Self = Self(9);  // [<$00]
+    const ILY: Self = Self(10); // [<$00],Y
     const ISY: Self = Self(11); // ($00,S),Y
     const ABS: Self = Self(12); // |$0000
     const ABX: Self = Self(13); // |$0000,X

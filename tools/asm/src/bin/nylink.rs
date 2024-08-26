@@ -116,7 +116,7 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
                     }
                 },
                 MemoryType::RW => match &section.ty {
-                    SectionType::RW | SectionType::BSS => {}
+                    SectionType::RW | SectionType::BSS | SectionType::DP => {}
                     _ => {
                         Err(ld.err(&format!(
                             "memory \"{}\" is not type-compatible with section \"{name}\"",
@@ -297,13 +297,43 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
             match reloc.width {
                 1 => {
                     if (value as u32) > (u8::MAX as u32) {
-                        Err(ld.err_in(
-                            reloc.unit,
-                            &format!(
-                                "expression >1 byte\n\tdefined at {}:{}:{}",
-                                reloc.pos.file, reloc.pos.line, reloc.pos.column
-                            ),
-                        ))?;
+                        // DP relocations are OK if they reloc inside of a DP section
+                        if (reloc.flags & RelocFlags::DP) != 0 {
+                            if ld
+                                .sections
+                                .iter()
+                                .find(|sec| {
+                                    // find DP section that holds this address
+                                    config
+                                        .sections
+                                        .iter()
+                                        .find(|(name, section)| {
+                                            matches!(section.ty, SectionType::DP)
+                                                && (sec.name == *name)
+                                        })
+                                        .is_some()
+                                        && ((value as u32) >= sec.pc)
+                                        && ((value as u32) < (sec.pc + (sec.data.len() as u32)))
+                                })
+                                .is_none()
+                            {
+                                Err(ld.err_in(
+                                    reloc.unit,
+                                    &format!(
+                                        "expression >1 byte\n\tdefined at {}:{}:{}",
+                                        reloc.pos.file, reloc.pos.line, reloc.pos.column
+                                    ),
+                                ))?;
+                            }
+                        } else {
+                            Err(ld.err_in(
+                                reloc.unit,
+                                &format!(
+                                    "expression >1 byte\n\tdefined at {}:{}:{}",
+                                    reloc.pos.file, reloc.pos.line, reloc.pos.column
+                                ),
+                            ))?;
+                        }
                     }
                     ld.sections[i].data[reloc.offset] = value as u8;
                 }
@@ -380,6 +410,9 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
     for (mem_name, memory) in &config.memories {
         for (sec_name, section) in &config.sections {
             if &section.load != mem_name {
+                continue;
+            }
+            if matches!(section.ty, SectionType::BSS | SectionType::DP) {
                 continue;
             }
             let section = &ld.sections.iter().find(|sec| sec.name == sec_name).unwrap();
@@ -962,6 +995,7 @@ enum SectionType {
     RO,
     RW,
     BSS,
+    DP,
 }
 
 fn one() -> u32 {
