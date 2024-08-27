@@ -5,17 +5,15 @@ _SNES_INC = 1
 ;; LoOAM Table OBJ Structure
 ;;
 ;; LoOAM Makes up the first 512 Words of OAM (128 OBJs)
+;;
 \struct OAMOBJ
     ;; Lo 8 Bits of X (rest in HiOAM)
-    ;;
     .X     1
 
     ;; Y Pos
-    ;;
     .Y     1
 
     ;; Lo 8 Bits of Tile (Hi Bit in .Attrs)
-    ;;
     .Tile  1
 
     ;; OBJ Attributes
@@ -67,7 +65,8 @@ OAMADDH = $2103
 
 ;; OAM Data Write (W)
 ;;
-;; Note: When writing to LoOAM, OAMADDR is only incremented every 2 writes.
+;; NOTE: When writing to LoOAM, OAMADDR is only incremented every 2 writes.
+;;
 OAMDATA = $2104
 
 ;; OAM Data Read (R)
@@ -134,6 +133,7 @@ BG4VOFS = $2114
 ;; 3 - BG3
 ;; 4 - BG4
 ;; o - OBJ
+;;
 TM = $212C
 
 ;; Subscreen Enable (W)
@@ -144,6 +144,7 @@ TM = $212C
 ;; 3 - BG3
 ;; 4 - BG4
 ;; o - OBJ
+;;
 TS = $212D
 
 ;; VRAM Port Control (W)
@@ -157,13 +158,14 @@ TS = $212D
 ;;      update the bitplanes of each row 32 of CHRs at a time.
 ;;      Obviously, this is intended for an 32x32 Tilemap with 8x8 tiles.
 ;;
-;;      Example 3 sequential writes for 2bpp:
+;;      Example sequential writes for the top-left 3 pixels in 8x8 tilemap @ 2bpp:
 ;;      ----------------------------        ----------------------------
 ;;      |write 1 |write 17|        |        |write 1 |write 3 |write 5 |
 ;;      |write 2 |        |        |   vs   |write 2 |write 4 |........|
 ;;      |--------|--------|--------|        |--------|--------|--------|
 ;;      |write 3 |        |        |        |write 65|        |        |
 ;;      |........|        |        |        |        |        |        |
+;;      ----------------------------        ----------------------------
 ;;
 ;; m  - Increment Mode (0 = After access of VMDATAL/VMDATALREAD)
 ;;                     (1 = After access of VMDATAH/VMDATAHREAD)
@@ -215,7 +217,7 @@ ROMSEL = $420D
 ;;
 ;;      Joypad Auto-Read will parallely read the joypad state into JOY1-4 at
 ;;      the start of VBlank.
-;;      Note: Check status of auto-read in HVBJOY1
+;;      NOTE: Check status of auto-read in HVBJOY1
 ;;
 ;; tt - Enable IRQs for H and VBlank Timers
 ;;                      (00 = No IRQs)

@@ -37,7 +37,7 @@ StartReset::
     lda #%0000_1_001
     sta BGMODE
 
-    ; lda <joyHeld
+    lda <joyHeld
 
     ; Enable Display
     lda #$0F

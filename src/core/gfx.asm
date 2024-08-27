@@ -2,6 +2,10 @@
 
 \include "snes.inc"
 
+\section "ZEROPAGE"
+
+gfxNmiFlags: \res 1
+
 \section "CORE"
 \native \index16 \accum8
 
