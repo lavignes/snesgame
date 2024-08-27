@@ -1,6 +1,6 @@
 ; vim: ft=nyasm
 
-\include "joy.inc"
+\include "snes.inc"
 
 \section "ZEROPAGE"
 
@@ -11,3 +11,10 @@ joyHeld:: \res 2
 \section "CORE"
 \native \index16 \accum8
 
+JoyUpdate::
+    ; If auto-read is still running, wait
+    lda #1
+    bit HVBJOY
+    beq JoyUpdate
+
+    rts

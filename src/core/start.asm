@@ -7,7 +7,7 @@
 \section "CORE"
 \native \index16 \accum8
 
-Start::
+StartReset::
     sei
     cld
 
@@ -31,24 +31,16 @@ Start::
     pha
     plb     ; DBR = #$80
 
-    ; Disable Display
-    lda #$8F
-    sta INIDISP
+    jsr GfxInit
 
     ; BG Mode 1
     lda #%0000_1_001
     sta BGMODE
 
-    lda <joyHeld
+    ; lda <joyHeld
 
     ; Enable Display
     lda #$0F
     sta INIDISP
 
     jmp *
-
-StartNmi::
-    rti
-
-StartIrq::
-    rti

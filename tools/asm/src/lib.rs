@@ -163,13 +163,13 @@ where
 #[derive(Debug, Clone, Copy)]
 pub enum Expr<'a> {
     Const(i32),
-    Addr(&'a str, u32),
     List(&'a [ExprNode<'a>]),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExprNode<'a> {
     Const(i32),
+    Addr(&'a str, u32),
     Op(Op),
     Label(Label<'a>),
     Tag(Label<'a>, &'a str),
@@ -184,16 +184,10 @@ impl RelocFlags {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum RelocVal<'a> {
-    Addr(&'a str, u32),
-    List(&'a [ExprNode<'a>]),
-}
-
-#[derive(Debug, Clone, Copy)]
 pub struct Reloc<'a> {
     pub offset: usize,
     pub width: u8,
-    pub value: RelocVal<'a>,
+    pub value: &'a [ExprNode<'a>],
     pub unit: &'a str,
     pub pos: Pos<'a>,
     pub flags: u8,

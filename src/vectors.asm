@@ -5,17 +5,19 @@
 \section "VECTORJUMP"
 ; Because our vectors are in slow rom, we need to jump to fast rom
 Reset:
-    jml @Start
+    jml @StartReset
 Nmi:
-    jml @StartNmi
+    jml @GfxNmi
 Irq:
-    jml @StartIrq
+    jml @TimeIrq
+Break:
+    jml @DbgBrk
 
 \section "VECTORS"
 ; Native Mode Vectors
 \word 0, 0          ; (reserved)
-\word $FFFF&Reset   ; COP
-\word $FFFF&Reset   ; BRK
+\word $FFFF&Break   ; COP
+\word $FFFF&Break   ; BRK
 \word 0             ; ABORT (unused)
 \word $FFFF&Nmi     ; NMI
 \word 0             ; (reserved)
@@ -23,10 +25,10 @@ Irq:
 
 ; Emulation Mode Vectors
 \word 0, 0          ; (reserved)
-\word $FFFF&Reset   ; COP
+\word $FFFF&Break   ; COP
 \word 0             ; (reserved)
 \word 0             ; ABORT (unused)
-\word $FFFF&Nmi     ; SMI
+\word $FFFF&Nmi     ; NMI
 \word $FFFF&Reset   ; RESET
 \word $FFFF&Irq     ; IRQ
 

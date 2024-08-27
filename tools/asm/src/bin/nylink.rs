@@ -14,8 +14,8 @@ use std::{
 use clap::Parser;
 use indexmap::IndexMap;
 use nyasm::{
-    Expr, ExprNode, Label, Op, Pos, Reloc, RelocFlags, RelocVal, Section, SliceInterner,
-    StrInterner, Sym, SymFlags, Tok,
+    Expr, ExprNode, Label, Op, Pos, Reloc, RelocFlags, Section, SliceInterner, StrInterner, Sym,
+    SymFlags, Tok,
 };
 use serde::{de, Deserialize, Deserializer};
 use serde_derive::{Deserialize, Serialize};
@@ -240,11 +240,6 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
         for i in 0..ld.syms.len() {
             let value = match ld.syms[i].value {
                 Expr::Const(value) => Expr::Const(value),
-                Expr::Addr(section, pc) => {
-                    let section = ld.sections.iter().find(|sec| sec.name == section).unwrap();
-                    let value = pc + section.pc;
-                    Expr::Const(value as i32)
-                }
                 Expr::List(expr) => {
                     if let Some(value) = ld.expr_eval(ld.syms[i].unit, expr, &config.sections) {
                         Expr::Const(value)
@@ -275,24 +270,17 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
     for i in 0..ld.sections.len() {
         for j in 0..ld.sections[i].relocs.len() {
             let reloc = ld.sections[i].relocs[j];
-            let value = match reloc.value {
-                RelocVal::Addr(section, pc) => {
-                    let section = ld.sections.iter().find(|sec| sec.name == section).unwrap();
-                    (pc + section.pc) as i32
-                }
-                RelocVal::List(expr) => {
-                    if let Some(value) = ld.expr_eval(reloc.unit, expr, &config.sections) {
-                        value
-                    } else {
-                        Err(ld.err_in(
-                            reloc.unit,
-                            &format!(
-                                "expression cannot be solved\n\tdefined at {}:{}:{}",
-                                reloc.pos.file, reloc.pos.line, reloc.pos.column
-                            ),
-                        ))?
-                    }
-                }
+            let value = if let Some(value) = ld.expr_eval(reloc.unit, reloc.value, &config.sections)
+            {
+                value
+            } else {
+                Err(ld.err_in(
+                    reloc.unit,
+                    &format!(
+                        "expression cannot be solved\n\tdefined at {}:{}:{}",
+                        reloc.pos.file, reloc.pos.line, reloc.pos.column
+                    ),
+                ))?
             };
             match reloc.width {
                 1 => {
@@ -628,6 +616,26 @@ impl<'a> Ld<'a> {
                             _ => return Err(self.err_in(file, "malformed expression table")),
                         }
                     }
+                    4 => {
+                        let index: u32 = self.read_int(&mut reader)?;
+                        let len: u32 = self.read_int(&mut reader)?;
+                        let expr_section = str_int
+                            .slice((index as usize)..((index as usize) + (len as usize)))
+                            .unwrap();
+                        let pc: u32 = self.read_int(&mut reader)?;
+                        let expr_section = self.str_int.intern(expr_section);
+                        let pc = if let Some(section) =
+                            self.sections.iter().find(|sec| sec.name == expr_section)
+                        {
+                            pc + section.pc
+                        } else {
+                            return Err(self.err_in(
+                                file,
+                                &format!("section \"{expr_section}\" is not defined in config"),
+                            ));
+                        };
+                        storage.push(ExprNode::Addr(expr_section, pc));
+                    }
                     _ => return Err(self.err_in(file, "malformed expression table")),
                 }
             }
@@ -671,27 +679,6 @@ impl<'a> Ld<'a> {
                     Expr::Const(value)
                 }
                 1 => {
-                    let index: u32 = self.read_int(&mut reader)?;
-                    let len: u32 = self.read_int(&mut reader)?;
-                    let expr_section = str_int
-                        .slice((index as usize)..((index as usize) + (len as usize)))
-                        .unwrap();
-                    let pc: u32 = self.read_int(&mut reader)?;
-                    let expr_section = self.str_int.intern(expr_section);
-                    // place the address relative to the start of the section
-                    let pc = if let Some(expr_section) =
-                        self.sections.iter().find(|sec| sec.name == expr_section)
-                    {
-                        pc + expr_section.pc
-                    } else {
-                        return Err(self.err_in(
-                            file,
-                            &format!("section \"{expr_section}\" is not defined in config"),
-                        ));
-                    };
-                    Expr::Addr(expr_section, pc)
-                }
-                2 => {
                     let index: u32 = self.read_int(&mut reader)?;
                     let len: u32 = self.read_int(&mut reader)?;
                     let expr = expr_int
@@ -780,41 +767,12 @@ impl<'a> Ld<'a> {
                 // place the offset relative to the start of the section
                 let offset = (offset as usize) + (section.pc as usize);
                 let width: u8 = self.read_int(&mut reader)?;
-                let ty: u8 = self.read_int(&mut reader)?;
-                let value = match ty {
-                    0 => {
-                        let index: u32 = self.read_int(&mut reader)?;
-                        let len: u32 = self.read_int(&mut reader)?;
-                        dbg!(index, len);
-                        let reloc_section = str_int
-                            .slice((index as usize)..((index as usize) + (len as usize)))
-                            .unwrap();
-                        let pc: u32 = self.read_int(&mut reader)?;
-                        let reloc_section = self.str_int.intern(reloc_section);
-                        // place the address relative to the start of the section
-                        let pc = if let Some(reloc_section) =
-                            self.sections.iter().find(|sec| sec.name == reloc_section)
-                        {
-                            pc + reloc_section.pc
-                        } else {
-                            return Err(self.err_in(
-                                file,
-                                &format!("section \"{reloc_section}\" is not defined in config"),
-                            ));
-                        };
-                        RelocVal::Addr(reloc_section, pc)
-                    }
-                    1 => {
-                        let index: u32 = self.read_int(&mut reader)?;
-                        let len: u32 = self.read_int(&mut reader)?;
-                        let expr = expr_int
-                            .slice((index as usize)..((index as usize) + (len as usize)))
-                            .unwrap();
-                        let expr = self.expr_int.intern(expr);
-                        RelocVal::List(expr)
-                    }
-                    _ => return Err(self.err_in(file, "malformed relocation table")),
-                };
+                let index: u32 = self.read_int(&mut reader)?;
+                let len: u32 = self.read_int(&mut reader)?;
+                let expr = expr_int
+                    .slice((index as usize)..((index as usize) + (len as usize)))
+                    .unwrap();
+                let value = self.expr_int.intern(expr);
                 let index: u32 = self.read_int(&mut reader)?;
                 let len: u32 = self.read_int(&mut reader)?;
                 let unit = str_int
@@ -881,16 +839,8 @@ impl<'a> Ld<'a> {
                     })?;
                     match sym.value {
                         Expr::Const(value) => scratch.push(value),
-                        Expr::Addr(section, pc) => {
-                            let section = self
-                                .sections
-                                .iter()
-                                .find(|sec| sec.name == section)
-                                .unwrap();
-                            scratch.push((pc + section.pc) as i32);
-                        }
-                        // expand the sub-expression recursively
                         Expr::List(expr) => {
+                            // expand the sub-expression recursively
                             scratch.push(self.expr_eval(unit, expr, sections)?);
                         }
                     }
@@ -944,6 +894,14 @@ impl<'a> Ld<'a> {
                         }
                         _ => unreachable!(),
                     }
+                }
+                ExprNode::Addr(section, pc) => {
+                    let section = self
+                        .sections
+                        .iter()
+                        .find(|sec| sec.name == section)
+                        .unwrap();
+                    scratch.push((pc + section.pc) as i32);
                 }
             }
         }

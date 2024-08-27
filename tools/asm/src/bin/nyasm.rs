@@ -15,8 +15,8 @@ use std::{
 
 use clap::Parser;
 use nyasm::{
-    Expr, ExprNode, Label, Op, Pos, Reloc, RelocFlags, RelocVal, Section, SliceInterner,
-    StrInterner, Sym, SymFlags, Tok,
+    Expr, ExprNode, Label, Op, Pos, Reloc, RelocFlags, Section, SliceInterner, StrInterner, Sym,
+    SymFlags, Tok,
 };
 use tracing::Level;
 
@@ -177,6 +177,13 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
                         output.write_all(&(index as u32).to_le_bytes())?;
                         output.write_all(&(tag.len() as u32).to_le_bytes())?;
                     }
+                    ExprNode::Addr(section, pc) => {
+                        output.write_all(&[4])?;
+                        let index = asm.str_int.offset(section).unwrap();
+                        output.write_all(&(index as u32).to_le_bytes())?;
+                        output.write_all(&(section.len() as u32).to_le_bytes())?;
+                        output.write_all(&pc.to_le_bytes())?;
+                    }
                 }
             }
         }
@@ -198,15 +205,8 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
                     output.write_all(&[0])?;
                     output.write_all(&value.to_le_bytes())?;
                 }
-                Expr::Addr(section, pc) => {
-                    output.write_all(&[1])?;
-                    let index = asm.str_int.offset(section).unwrap();
-                    output.write_all(&(index as u32).to_le_bytes())?;
-                    output.write_all(&(section.len() as u32).to_le_bytes())?;
-                    output.write_all(&pc.to_le_bytes())?;
-                }
                 Expr::List(expr) => {
-                    output.write_all(&[2])?;
+                    output.write_all(&[1])?;
                     let index = asm.expr_int.offset(expr).unwrap();
                     output.write_all(&(index as u32).to_le_bytes())?;
                     output.write_all(&(expr.len() as u32).to_le_bytes())?;
@@ -251,21 +251,9 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
             for reloc in section.relocs {
                 output.write_all(&(reloc.offset as u32).to_le_bytes())?;
                 output.write_all(&reloc.width.to_le_bytes())?;
-                match reloc.value {
-                    RelocVal::Addr(section, pc) => {
-                        output.write_all(&[0])?;
-                        let index = asm.str_int.offset(section).unwrap();
-                        output.write_all(&(index as u32).to_le_bytes())?;
-                        output.write_all(&(section.len() as u32).to_le_bytes())?;
-                        output.write_all(&pc.to_le_bytes())?;
-                    }
-                    RelocVal::List(expr) => {
-                        output.write_all(&[1])?;
-                        let index = asm.expr_int.offset(expr).unwrap();
-                        output.write_all(&(index as u32).to_le_bytes())?;
-                        output.write_all(&(expr.len() as u32).to_le_bytes())?;
-                    }
-                }
+                let index = asm.expr_int.offset(reloc.value).unwrap();
+                output.write_all(&(index as u32).to_le_bytes())?;
+                output.write_all(&(reloc.value.len() as u32).to_le_bytes())?;
                 let index = asm.str_int.offset(reloc.unit).unwrap();
                 output.write_all(&(index as u32).to_le_bytes())?;
                 output.write_all(&(reloc.unit.len() as u32).to_le_bytes())?;
@@ -510,7 +498,8 @@ impl<'a> Asm<'a> {
 
                     // otherwise it is a pointer to the current PC
                     let section = self.sections[self.section].name;
-                    self.syms[index].value = Expr::Addr(section, self.pc());
+                    self.syms[index].value =
+                        Expr::List(self.expr_int.intern(&[ExprNode::Addr(section, self.pc())]));
                     continue;
                 }
                 if mne.is_none() {
@@ -625,20 +614,12 @@ impl<'a> Asm<'a> {
                     Err(self.err("expression must be constant"))
                 }
             }
-            _ => Err(self.err("expression must be constant")),
         }
     }
 
     fn const_branch_expr(&self, expr: Expr<'_>) -> io::Result<i32> {
         match expr {
             Expr::Const(value) => Ok(value),
-            Expr::Addr(section, pc) => {
-                if self.sections[self.section].name == section {
-                    Ok(pc as i32)
-                } else {
-                    Err(self.err("branch expression must be constant"))
-                }
-            }
             Expr::List(expr) => {
                 if let Some(value) = self.expr_branch_eval(expr, true) {
                     Ok(value)
@@ -707,10 +688,11 @@ impl<'a> Asm<'a> {
         // sort of a pratt/shunting-yard algorithm combo
         loop {
             match self.peek()? {
-                // star is multiply or the PC (as a const, intentionally)
+                // star is multiply or the PC (as a section-relative address)
                 Tok::STAR => {
                     if !seen_val {
-                        self.expr_buffer.push(ExprNode::Const(self.pc() as i32));
+                        let section = self.sections[self.section].name;
+                        self.expr_buffer.push(ExprNode::Addr(section, self.pc()));
                         seen_val = true;
                         self.eat();
                         continue;
@@ -897,16 +879,8 @@ impl<'a> Asm<'a> {
                     if let Some(sym) = self.syms.iter().find(|sym| &sym.label == &label) {
                         match sym.value {
                             Expr::Const(value) => scratch.push(value),
-                            Expr::Addr(section, pc) => {
-                                if branch && (self.sections[self.section].name == section) {
-                                    scratch.push(pc as i32)
-                                } else {
-                                    // the linker has to handle this
-                                    return None;
-                                }
-                            }
-                            // expand the sub-expression recursively
                             Expr::List(expr) => {
+                                // expand the sub-expression recursively
                                 scratch.push(self.expr_branch_eval(expr, branch)?);
                             }
                         }
@@ -959,6 +933,15 @@ impl<'a> Asm<'a> {
                         _ => unreachable!(),
                     }
                 }
+                ExprNode::Addr(section, pc) => {
+                    // branches within the section can be resolved constantly
+                    if branch && (self.sections[self.section].name == section) {
+                        scratch.push(pc as i32)
+                    } else {
+                        // the linker has to handle this
+                        return None;
+                    }
+                }
             }
         }
         scratch.last().copied()
@@ -975,12 +958,11 @@ impl<'a> Asm<'a> {
     fn reloc(&mut self, offset: usize, width: u8, expr: Expr<'a>, pos: Pos<'a>, flags: u8) {
         let pc = self.pc() as usize;
         let offset = pc + offset;
+        let unit = self.str_int.intern("__STATIC__");
         let value = match expr {
             Expr::Const(_) => unreachable!(),
-            Expr::Addr(section, pc) => RelocVal::Addr(section, pc),
-            Expr::List(expr) => RelocVal::List(expr),
+            Expr::List(expr) => expr,
         };
-        let unit = self.str_int.intern("__STATIC__");
         self.sections[self.section].relocs.push(Reloc {
             offset,
             width,
@@ -1751,7 +1733,7 @@ impl<'a> Asm<'a> {
                                 } else {
                                     0
                                 };
-                                self.write(&[0xFD, 0xFD, 0xFd]);
+                                self.write(&[0xFD, 0xFD, 0xFD]);
                                 self.reloc(1, 3, expr, pos, flags);
                             }
                         }
