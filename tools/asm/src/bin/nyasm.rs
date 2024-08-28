@@ -391,7 +391,7 @@ impl<'a> Asm<'a> {
                 self.eat();
                 let expr = self.expr()?;
                 let expr = self.const_expr(expr)?;
-                self.set_pc(self.range_24(expr)?);
+                self.set_pc(self.range_u24(expr)?);
                 self.eol()?;
                 continue;
             }
@@ -630,22 +630,36 @@ impl<'a> Asm<'a> {
         }
     }
 
-    fn range_24(&self, value: i32) -> io::Result<u32> {
+    fn range_u24(&self, value: i32) -> io::Result<u32> {
         if (value as u32) > 0x00FFFFFFu32 {
             return Err(self.err("expression >3 bytes"));
         }
         Ok(value as u32)
     }
 
-    fn range_16(&self, value: i32) -> io::Result<u16> {
+    fn range_u16(&self, value: i32) -> io::Result<u16> {
         if (value as u32) > (u16::MAX as u32) {
             return Err(self.err("expression >2 bytes"));
         }
         Ok(value as u16)
     }
 
-    fn range_8(&self, value: i32) -> io::Result<u8> {
+    fn range_u8(&self, value: i32) -> io::Result<u8> {
         if (value as u32) > (u8::MAX as u32) {
+            return Err(self.err("expression >1 byte"));
+        }
+        Ok(value as u8)
+    }
+
+    fn range_i16(&self, value: i32) -> io::Result<u16> {
+        if value > (i16::MAX as i32) {
+            return Err(self.err("expression >2 bytes"));
+        }
+        Ok(value as u16)
+    }
+
+    fn range_i8(&self, value: i32) -> io::Result<u8> {
+        if value > (i8::MAX as i32) {
             return Err(self.err("expression >1 byte"));
         }
         Ok(value as u8)
@@ -1018,14 +1032,14 @@ impl<'a> Asm<'a> {
                     self.write(&[op]);
                     if width == 1 {
                         if let Ok(value) = self.const_expr(expr) {
-                            self.write(&self.range_8(value)?.to_le_bytes());
+                            self.write(&self.range_u8(value)?.to_le_bytes());
                         } else {
                             self.write(&[0xFD]);
                             self.reloc(1, 1, expr, pos, 0);
                         }
                     } else {
                         if let Ok(value) = self.const_expr(expr) {
-                            self.write(&self.range_16(value)?.to_le_bytes());
+                            self.write(&self.range_u16(value)?.to_le_bytes());
                         } else {
                             self.write(&[0xFD, 0xFD]);
                             self.reloc(1, 2, expr, pos, 0);
@@ -1063,13 +1077,13 @@ impl<'a> Asm<'a> {
                                     if self.emit {
                                         self.write(&[op]);
                                         let value = self.const_expr(expr)?;
-                                        self.write(&self.range_8(value)?.to_le_bytes());
+                                        self.write(&self.range_u8(value)?.to_le_bytes());
                                     }
                                     return self.add_pc(2);
                                 }
                                 // IDP?
                                 if let Ok(value) = self.const_expr(expr) {
-                                    if let Ok(byte) = self.range_8(value) {
+                                    if let Ok(byte) = self.range_u8(value) {
                                         if let Ok(op) = self.check_opcode(mne.1, Addr::IDP) {
                                             if self.emit {
                                                 self.write(&[op]);
@@ -1084,7 +1098,7 @@ impl<'a> Asm<'a> {
                                 if self.emit {
                                     self.write(&[op]);
                                     if let Ok(value) = self.const_expr(expr) {
-                                        self.write(&self.range_16(value)?.to_le_bytes());
+                                        self.write(&self.range_u16(value)?.to_le_bytes());
                                     } else {
                                         // At link time, we want to allow JMPs within the
                                         // same program bank.
@@ -1113,13 +1127,13 @@ impl<'a> Asm<'a> {
                                     if self.emit {
                                         self.write(&[op]);
                                         let value = self.const_expr(expr)?;
-                                        self.write(&self.range_8(value)?.to_le_bytes());
+                                        self.write(&self.range_u8(value)?.to_le_bytes());
                                     }
                                     return self.add_pc(2);
                                 }
                                 // IDX?
                                 if let Ok(value) = self.const_expr(expr) {
-                                    if let Ok(byte) = self.range_8(value) {
+                                    if let Ok(byte) = self.range_u8(value) {
                                         if let Ok(op) = self.check_opcode(mne.1, Addr::IDX) {
                                             self.expect(Tok::X)?;
                                             self.expect(Tok::RPAREN)?;
@@ -1138,7 +1152,7 @@ impl<'a> Asm<'a> {
                                 if self.emit {
                                     self.write(&[op]);
                                     if let Ok(value) = self.const_expr(expr) {
-                                        self.write(&self.range_16(value)?.to_le_bytes());
+                                        self.write(&self.range_u16(value)?.to_le_bytes());
                                     } else {
                                         // At link time, we want to allow JMPs within the
                                         // same program bank.
@@ -1165,7 +1179,7 @@ impl<'a> Asm<'a> {
                             if self.emit {
                                 self.write(&[op]);
                                 if let Ok(value) = self.const_expr(expr) {
-                                    self.write(&self.range_8(value)?.to_le_bytes());
+                                    self.write(&self.range_u8(value)?.to_le_bytes());
                                 } else {
                                     self.write(&[0xFD]);
                                     self.reloc(1, 1, expr, pos, RelocFlags::DP);
@@ -1181,7 +1195,7 @@ impl<'a> Asm<'a> {
                             if self.emit {
                                 self.write(&[op]);
                                 if let Ok(value) = self.const_expr(expr) {
-                                    self.write(&self.range_8(value)?.to_le_bytes());
+                                    self.write(&self.range_u8(value)?.to_le_bytes());
                                 } else {
                                     self.write(&[0xFD]);
                                     self.reloc(1, 1, expr, pos, RelocFlags::DP);
@@ -1194,7 +1208,7 @@ impl<'a> Asm<'a> {
                         if self.emit {
                             self.write(&[op]);
                             if let Ok(value) = self.const_expr(expr) {
-                                self.write(&self.range_8(value)?.to_le_bytes());
+                                self.write(&self.range_u8(value)?.to_le_bytes());
                             } else {
                                 self.write(&[0xFD]);
                                 self.reloc(1, 1, expr, pos, RelocFlags::DP);
@@ -1212,7 +1226,7 @@ impl<'a> Asm<'a> {
                             if self.emit {
                                 self.write(&[op]);
                                 if let Ok(value) = self.const_expr(expr) {
-                                    self.write(&self.range_16(value)?.to_le_bytes());
+                                    self.write(&self.range_u16(value)?.to_le_bytes());
                                 } else {
                                     self.write(&[0xFD, 0xFD]);
                                     self.reloc(1, 2, expr, pos, 0);
@@ -1226,7 +1240,7 @@ impl<'a> Asm<'a> {
                         if self.emit {
                             self.write(&[op]);
                             if let Ok(value) = self.const_expr(expr) {
-                                self.write(&self.range_16(value)?.to_le_bytes());
+                                self.write(&self.range_u16(value)?.to_le_bytes());
                             } else {
                                 self.write(&[0xFD, 0xFD]);
                                 self.reloc(1, 2, expr, pos, 0);
@@ -1264,13 +1278,13 @@ impl<'a> Asm<'a> {
                             if self.emit {
                                 self.write(&[op]);
                                 let value = self.const_expr(expr)?;
-                                self.write(&self.range_8(value)?.to_le_bytes());
+                                self.write(&self.range_u8(value)?.to_le_bytes());
                             }
                             return self.add_pc(2);
                         }
                         // IDL?
                         if let Ok(value) = self.const_expr(expr) {
-                            if let Ok(byte) = self.range_8(value) {
+                            if let Ok(byte) = self.range_u8(value) {
                                 if let Ok(op) = self.check_opcode(mne.1, Addr::IDL) {
                                     if self.emit {
                                         self.write(&[op]);
@@ -1285,7 +1299,7 @@ impl<'a> Asm<'a> {
                         if self.emit {
                             self.write(&[op]);
                             if let Ok(value) = self.const_expr(expr) {
-                                self.write(&self.range_16(value)?.to_le_bytes());
+                                self.write(&self.range_u16(value)?.to_le_bytes());
                             } else {
                                 self.write(&[0xFD, 0xFD]);
                                 self.reloc(1, 2, expr, pos, 0);
@@ -1302,7 +1316,7 @@ impl<'a> Asm<'a> {
                             if self.emit {
                                 self.write(&[op]);
                                 if let Ok(value) = self.const_expr(expr) {
-                                    self.write(&self.range_8(value)?.to_le_bytes());
+                                    self.write(&self.range_u8(value)?.to_le_bytes());
                                 } else {
                                     self.write(&[0xFD]);
                                     self.reloc(1, 1, expr, pos, RelocFlags::DP);
@@ -1315,7 +1329,7 @@ impl<'a> Asm<'a> {
                         if self.emit {
                             self.write(&[op]);
                             if let Ok(value) = self.const_expr(expr) {
-                                self.write(&self.range_8(value)?.to_le_bytes());
+                                self.write(&self.range_u8(value)?.to_le_bytes());
                             } else {
                                 self.write(&[0xFD]);
                                 self.reloc(1, 1, expr, pos, RelocFlags::DP);
@@ -1329,7 +1343,7 @@ impl<'a> Asm<'a> {
                         if self.emit {
                             self.write(&[op]);
                             if let Ok(value) = self.const_expr(expr) {
-                                self.write(&self.range_16(value)?.to_le_bytes());
+                                self.write(&self.range_u16(value)?.to_le_bytes());
                             } else {
                                 self.write(&[0xFD, 0xFD]);
                                 self.reloc(1, 2, expr, pos, 0);
@@ -1351,13 +1365,13 @@ impl<'a> Asm<'a> {
                     if self.emit {
                         self.write(&[op]);
                         if let Ok(value) = self.const_expr(src) {
-                            self.write(&self.range_8(value)?.to_le_bytes());
+                            self.write(&self.range_u8(value)?.to_le_bytes());
                         } else {
                             self.write(&[0xFD]);
                             self.reloc(1, 1, src, src_pos, 0);
                         }
                         if let Ok(value) = self.const_expr(dst) {
-                            self.write(&self.range_8(value)?.to_le_bytes());
+                            self.write(&self.range_u8(value)?.to_le_bytes());
                         } else {
                             self.write(&[0xFD]);
                             self.reloc(2, 1, dst, dst_pos, 0);
@@ -1372,7 +1386,8 @@ impl<'a> Asm<'a> {
                     if self.emit {
                         self.write(&[op]);
                         let value = self.const_branch_expr(expr)?;
-                        self.write(&self.range_16(value)?.to_le_bytes());
+                        let value = value - (self.pc() as i32) - 3;
+                        self.write(&self.range_i16(value)?.to_le_bytes());
                     }
                     return self.add_pc(3);
                 }
@@ -1384,7 +1399,8 @@ impl<'a> Asm<'a> {
                     if self.emit {
                         self.write(&[op]);
                         let value = self.const_branch_expr(expr)?;
-                        self.write(&self.range_8(value)?.to_le_bytes());
+                        let value = value - (self.pc() as i32) - 2;
+                        self.write(&self.range_i8(value)?.to_le_bytes());
                     }
                     return self.add_pc(2);
                 }
@@ -1409,7 +1425,7 @@ impl<'a> Asm<'a> {
                     Length::None => {
                         if let Ok(value) = self.const_expr(expr) {
                             // SR, DP, DPX, or DPY?
-                            if let Ok(byte) = self.range_8(value) {
+                            if let Ok(byte) = self.range_u8(value) {
                                 // SR, DPX, DPY?
                                 if self.peek()? == Tok::COMMA {
                                     self.eat();
@@ -1496,7 +1512,7 @@ impl<'a> Asm<'a> {
                                 }
                             }
                             // ABS, ABX, or ABY?
-                            if let Ok(value) = self.range_16(value) {
+                            if let Ok(value) = self.range_u16(value) {
                                 // ABX or ABY?
                                 if self.peek()? == Tok::COMMA {
                                     self.eat();
@@ -1545,7 +1561,7 @@ impl<'a> Asm<'a> {
                                 }
                                 return self.add_pc(4);
                             }
-                            let value = self.range_24(value)?;
+                            let value = self.range_u24(value)?;
                             // ALX
                             if self.peek()? == Tok::COMMA {
                                 self.eat();
@@ -1616,7 +1632,7 @@ impl<'a> Asm<'a> {
                                 if self.emit {
                                     self.write(&[op]);
                                     if let Ok(value) = self.const_expr(expr) {
-                                        self.write(&self.range_8(value)?.to_le_bytes());
+                                        self.write(&self.range_u8(value)?.to_le_bytes());
                                     } else {
                                         self.write(&[0xFD]);
                                         self.reloc(1, 1, expr, pos, RelocFlags::DP);
@@ -1629,7 +1645,7 @@ impl<'a> Asm<'a> {
                             if self.emit {
                                 self.write(&[op]);
                                 if let Ok(value) = self.const_expr(expr) {
-                                    self.write(&self.range_8(value)?.to_le_bytes());
+                                    self.write(&self.range_u8(value)?.to_le_bytes());
                                 } else {
                                     self.write(&[0xFD]);
                                     self.reloc(1, 1, expr, pos, RelocFlags::DP);
@@ -1642,7 +1658,7 @@ impl<'a> Asm<'a> {
                         if self.emit {
                             self.write(&[op]);
                             if let Ok(value) = self.const_expr(expr) {
-                                self.write(&self.range_8(value)?.to_le_bytes());
+                                self.write(&self.range_u8(value)?.to_le_bytes());
                             } else {
                                 self.write(&[0xFD]);
                                 self.reloc(1, 1, expr, pos, RelocFlags::DP);
@@ -1661,7 +1677,7 @@ impl<'a> Asm<'a> {
                                 if self.emit {
                                     self.write(&[op]);
                                     if let Ok(value) = self.const_expr(expr) {
-                                        self.write(&self.range_16(value)?.to_le_bytes());
+                                        self.write(&self.range_u16(value)?.to_le_bytes());
                                     } else {
                                         self.write(&[0xFD, 0xFD]);
                                         self.reloc(1, 2, expr, pos, 0);
@@ -1674,7 +1690,7 @@ impl<'a> Asm<'a> {
                             if self.emit {
                                 self.write(&[op]);
                                 if let Ok(value) = self.const_expr(expr) {
-                                    self.write(&self.range_16(value)?.to_le_bytes());
+                                    self.write(&self.range_u16(value)?.to_le_bytes());
                                 } else {
                                     self.write(&[0xFD, 0xFD]);
                                     self.reloc(1, 2, expr, pos, 0);
@@ -1687,7 +1703,7 @@ impl<'a> Asm<'a> {
                         if self.emit {
                             self.write(&[op]);
                             if let Ok(value) = self.const_expr(expr) {
-                                self.write(&self.range_16(value)?.to_le_bytes());
+                                self.write(&self.range_u16(value)?.to_le_bytes());
                             } else {
                                 // At link time, we want to allow JMPs within the
                                 // same program bank.
@@ -1711,7 +1727,7 @@ impl<'a> Asm<'a> {
                             if self.emit {
                                 self.write(&[op]);
                                 if let Ok(value) = self.const_expr(expr) {
-                                    self.write(&self.range_24(value)?.to_le_bytes());
+                                    self.write(&self.range_u24(value)?.to_le_bytes());
                                 } else {
                                     self.write(&[0xFD, 0xFD, 0xFD]);
                                     self.reloc(1, 3, expr, pos, 0);
@@ -1724,7 +1740,7 @@ impl<'a> Asm<'a> {
                         if self.emit {
                             self.write(&[op]);
                             if let Ok(value) = self.const_expr(expr) {
-                                self.write(&self.range_24(value)?.to_le_bytes());
+                                self.write(&self.range_u24(value)?.to_le_bytes());
                             } else {
                                 // At link time, we want to warn on JMLs within the
                                 // same program bank.
@@ -1760,7 +1776,7 @@ impl<'a> Asm<'a> {
                         let expr = self.expr()?;
                         if self.emit {
                             if let Ok(value) = self.const_expr(expr) {
-                                self.write(&self.range_8(value)?.to_le_bytes());
+                                self.write(&self.range_u8(value)?.to_le_bytes());
                             } else {
                                 self.write(&[0x0FD]);
                                 self.reloc(0, 1, expr, pos, 0);
@@ -1782,7 +1798,7 @@ impl<'a> Asm<'a> {
                     let expr = self.expr()?;
                     if self.emit {
                         if let Ok(value) = self.const_expr(expr) {
-                            self.write(&self.range_16(value)?.to_le_bytes());
+                            self.write(&self.range_u16(value)?.to_le_bytes());
                         } else {
                             self.write(&[0xFD, 0xFD]);
                             self.reloc(0, 2, expr, pos, 0);
@@ -1803,7 +1819,7 @@ impl<'a> Asm<'a> {
                     let expr = self.expr()?;
                     if self.emit {
                         if let Ok(value) = self.const_expr(expr) {
-                            self.write(&self.range_24(value)?.to_le_bytes());
+                            self.write(&self.range_u24(value)?.to_le_bytes());
                         } else {
                             self.write(&[0xFD, 0xFD, 0xFD]);
                             self.reloc(0, 3, expr, pos, 0);
@@ -1887,7 +1903,7 @@ impl<'a> Asm<'a> {
                 self.eat();
                 let expr = self.expr()?;
                 let expr = self.const_expr(expr)?;
-                let res = self.range_24(expr)?;
+                let res = self.range_u24(expr)?;
                 // reserve space by allocating literal bytes
                 // if we dont do this, our current linker will
                 // overlap the same section across objects as pc
