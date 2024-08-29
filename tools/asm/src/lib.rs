@@ -327,6 +327,8 @@ impl Tok {
     pub const ACCUM16: Self = Self(0xA3);
     pub const EMULATION: Self = Self(0xA4);
     pub const NATIVE: Self = Self(0xA5);
+    pub const PUSH: Self = Self(0xA6);
+    pub const POP: Self = Self(0xA7);
 
     pub const ARG: Self = Self(0xB0);
     pub const NARG: Self = Self(0xB1);

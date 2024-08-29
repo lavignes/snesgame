@@ -305,20 +305,25 @@ fn main_real(args: Args) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+#[derive(Clone, Copy, Debug)]
+struct PushState {
+    section: usize,
+    index8: bool,
+    accum8: bool,
+    emulation: bool,
+}
+
 struct Asm<'a> {
     toks: Vec<Box<dyn TokStream<'a> + 'a>>,
     str_int: StrInterner<'a>,
     tok_int: SliceInterner<(Pos<'a>, MacroTok<'a>)>,
     loop_int: SliceInterner<(Pos<'a>, LoopTok<'a>)>,
     expr_int: SliceInterner<ExprNode<'a>>,
+    states: Vec<PushState>,
     sections: Vec<Section<'a>>,
-    section: usize,
     syms: Vec<Sym<'a>>,
     scope: Option<&'a str>,
     emit: bool,
-    index8: bool,
-    accum8: bool,
-    emulation: bool,
     if_level: usize,
     includes: Vec<PathBuf>,     // from args
     included: HashSet<PathBuf>, // for tracking usage with -M flag
@@ -342,13 +347,15 @@ impl<'a> Asm<'a> {
             loop_int: SliceInterner::new(),
             expr_int: SliceInterner::new(),
             sections: vec![Section::new(code)],
-            section: 0,
+            states: vec![PushState {
+                section: 0,
+                index8: true,
+                accum8: true,
+                emulation: true,
+            }],
             syms: Vec::new(),
             scope: None,
             emit: false,
-            index8: true,
-            accum8: true,
-            emulation: true,
             if_level: 0,
             includes,
             included: HashSet::new(),
@@ -364,12 +371,14 @@ impl<'a> Asm<'a> {
     fn rewind(&mut self) -> io::Result<()> {
         self.toks.last_mut().unwrap().rewind()?;
         self.sections = vec![Section::new(self.str_int.intern("__CODE__"))];
-        self.section = 0;
+        self.states = vec![PushState {
+            section: 0,
+            index8: true,
+            accum8: true,
+            emulation: true,
+        }];
         self.scope = None;
         self.emit = true;
-        self.index8 = true;
-        self.accum8 = true;
-        self.emulation = true;
         self.if_level = 0;
         self.unique = 0;
         Ok(())
@@ -440,7 +449,7 @@ impl<'a> Asm<'a> {
                         // save in the symbol table with temporary value
                         let index = self.syms.len();
                         let unit = self.str_int.intern("__STATIC__");
-                        let section = self.sections[self.section].name;
+                        let section = self.sections[self.state().section].name;
                         self.syms.push(Sym {
                             label,
                             value: Expr::Const(0),
@@ -497,7 +506,7 @@ impl<'a> Asm<'a> {
                     }
 
                     // otherwise it is a pointer to the current PC
-                    let section = self.sections[self.section].name;
+                    let section = self.sections[self.state().section].name;
                     self.syms[index].value =
                         Expr::List(self.expr_int.intern(&[ExprNode::Addr(section, self.pc())]));
                     continue;
@@ -515,12 +524,21 @@ impl<'a> Asm<'a> {
         Ok(())
     }
 
+    fn state(&self) -> &PushState {
+        self.states.last().unwrap()
+    }
+
+    fn state_mut(&mut self) -> &mut PushState {
+        self.states.last_mut().unwrap()
+    }
+
     fn pc(&self) -> u32 {
-        self.sections[self.section].pc
+        self.sections[self.state().section].pc
     }
 
     fn set_pc(&mut self, val: u32) {
-        self.sections[self.section].pc = val;
+        let section = self.state().section;
+        self.sections[section].pc = val;
     }
 
     fn add_pc(&mut self, amt: u32) -> io::Result<()> {
@@ -571,17 +589,19 @@ impl<'a> Asm<'a> {
     }
 
     fn write(&mut self, buf: &[u8]) {
-        self.sections[self.section].data.extend_from_slice(buf);
+        let section = self.state().section;
+        self.sections[section].data.extend_from_slice(buf);
     }
 
     fn write_str(&mut self) {
         let Self {
             ref mut sections,
-            section,
+            states,
             toks,
             ..
         } = self;
-        sections[*section]
+        let section = states.last().unwrap().section;
+        sections[section]
             .data
             .extend_from_slice(toks.last().unwrap().str().as_bytes());
     }
@@ -705,7 +725,7 @@ impl<'a> Asm<'a> {
                 // star is multiply or the PC (as a section-relative address)
                 Tok::STAR => {
                     if !seen_val {
-                        let section = self.sections[self.section].name;
+                        let section = self.sections[self.state().section].name;
                         self.expr_buffer.push(ExprNode::Addr(section, self.pc()));
                         seen_val = true;
                         self.eat();
@@ -949,7 +969,7 @@ impl<'a> Asm<'a> {
                 }
                 ExprNode::Addr(section, pc) => {
                     // branches within the section can be resolved constantly
-                    if branch && (self.sections[self.section].name == section) {
+                    if branch && (self.sections[self.state().section].name == section) {
                         scratch.push(pc as i32)
                     } else {
                         // the linker has to handle this
@@ -977,7 +997,8 @@ impl<'a> Asm<'a> {
             Expr::Const(_) => unreachable!(),
             Expr::List(expr) => expr,
         };
-        self.sections[self.section].relocs.push(Reloc {
+        let section = self.state().section;
+        self.sections[section].relocs.push(Reloc {
             offset,
             width,
             value,
@@ -999,7 +1020,7 @@ impl<'a> Asm<'a> {
         let op = self
             .find_opcode(addrs, addr)
             .ok_or_else(|| self.err("illegal address mode"))?;
-        if self.emulation && NATIVE_OPCODES.contains(&op) {
+        if self.state().emulation && NATIVE_OPCODES.contains(&op) {
             Err(self.err("instruction/address mode requires native mode"))
         } else {
             Ok(op)
@@ -1019,9 +1040,9 @@ impl<'a> Asm<'a> {
                 #[rustfmt::skip]
                 let width = match mne.0 {
                     Mne::ADC | Mne::AND | Mne::BIT | Mne::CMP | Mne::EOR | Mne::ORA | Mne::LDA | Mne::SBC
-                        => if self.accum8 { 1 } else { 2 },
+                        => if self.state().accum8 { 1 } else { 2 },
                     Mne::CPX | Mne::CPY | Mne::LDX | Mne::LDY
-                        => if self.index8 { 1 } else { 2 },
+                        => if self.state().index8 { 1 } else { 2 },
                     _ => 1,
                 };
                 let op = self.check_opcode(mne.1, Addr::IMM)?;
@@ -1853,7 +1874,7 @@ impl<'a> Asm<'a> {
                     self.sections.push(Section::new(name));
                     index
                 };
-                self.section = index;
+                self.state_mut().section = index;
                 self.eol()?;
             }
             Tok::INCLUDE => {
@@ -1934,27 +1955,39 @@ impl<'a> Asm<'a> {
             }
             Tok::INDEX8 => {
                 self.eat();
-                self.index8 = true;
+                self.state_mut().index8 = true;
             }
             Tok::INDEX16 => {
                 self.eat();
-                self.index8 = false;
+                self.state_mut().index8 = false;
             }
             Tok::ACCUM8 => {
                 self.eat();
-                self.accum8 = true;
+                self.state_mut().accum8 = true;
             }
             Tok::ACCUM16 => {
                 self.eat();
-                self.accum8 = false;
+                self.state_mut().accum8 = false;
             }
             Tok::EMULATION => {
                 self.eat();
-                self.emulation = true;
+                self.state_mut().emulation = true;
             }
             Tok::NATIVE => {
                 self.eat();
-                self.emulation = false;
+                self.state_mut().emulation = false;
+            }
+            Tok::PUSH => {
+                self.eat();
+                let state = *self.state();
+                self.states.push(state);
+            }
+            Tok::POP => {
+                self.eat();
+                self.states.pop();
+                if self.states.is_empty() {
+                    return Err(self.err("cannot pop more state"));
+                }
             }
             _ => return Err(self.err("expected directive")),
         }
@@ -2051,7 +2084,7 @@ impl<'a> Asm<'a> {
         // TODO: check if struct already defined (similar to macro)
         let mut size = 0;
         let unit = self.str_int.intern("__STATIC__");
-        let section = self.sections[self.section].name;
+        let section = self.sections[self.state().section].name;
         loop {
             match self.peek()? {
                 Tok::NEWLINE => {
@@ -2556,6 +2589,8 @@ const DIRECTIVES: &[(&'static str, Tok)] = &[
     ("ACCUM16", Tok::ACCUM16),
     ("EMULATION", Tok::EMULATION),
     ("NATIVE", Tok::NATIVE),
+    ("PUSH", Tok::PUSH),
+    ("POP", Tok::POP),
     ("NARG", Tok::NARG),
     ("SHIFT", Tok::SHIFT),
     ("UNIQ", Tok::UNIQ),

@@ -45,6 +45,8 @@ syn match nyasmDirective "\\accum8"
 syn match nyasmDirective "\\accum16"
 syn match nyasmDirective "\\emulation"
 syn match nyasmDirective "\\native"
+syn match nyasmDirective "\\push"
+syn match nyasmDirective "\\pop"
 
 syn match nyasmComment ";.*" contains=nyasmTodo
 syn match nyasmDocComment ";;.*" contains=nyasmTodo
@@ -62,7 +64,7 @@ syn case match
 hi def link nyasmComment      Comment
 hi def link nyasmDocComment   SpecialComment
 hi def link nyasmNumber       Number
-hi def link nyasmString	       String
+hi def link nyasmString	      String
 hi def link nyasmChar         Character
 hi def link nyasmIdentifier   Identifier
 hi def link nyasmRegister     Identifier
