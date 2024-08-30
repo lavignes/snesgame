@@ -861,6 +861,7 @@ impl<'a> Ld<'a> {
                         Op::Unary(Tok::TILDE) => scratch.push(!rhs),
                         Op::Unary(Tok::BANG) => scratch.push((rhs == 0) as i32),
                         Op::Unary(Tok::LT) => scratch.push(((rhs as u32) & 0xFF) as i32),
+                        Op::Unary(Tok::PIPE) => scratch.push(((rhs as u32) & 0xFFFF) as i32),
                         Op::Unary(Tok::GT) => scratch.push((((rhs as u32) & 0xFF00) >> 8) as i32),
                         Op::Unary(Tok::CARET) => {
                             scratch.push((((rhs as u32) & 0xFF0000) >> 16) as i32)
