@@ -14,8 +14,7 @@ StartReset::
     ; Set native, index16, and accum8
     clc
     xce
-    rep #$10
-    sep #$20
+    SET_A8I16
 
     ; Enable FastROM
     lda #1
@@ -25,22 +24,36 @@ StartReset::
     ldx #$02FF
     txs
 
+    ; DP=$0000
     pea $0000
-    pld     ; DP to $0000
+    pld
+    ; DB=$80
     lda #$80
     pha
-    plb     ; DBR = #$80
+    plb
+
+    ; Make sure no crazy interrupts happen
+    stz NMITIMEN
+    stz HDMAEN
+
+    ; Clear LoRAM really inefficiently
+    ; We need to at least clear the stack before JSRing
+    ldx #|(__LORAM_START__ + __LORAM_SIZE__)
+.ClearStack:
+    dex
+    stz |$0000,X
+    bne .ClearStack
 
     jsr GfxInit
+    jsr MemInit
+    jsr JoyInit
 
     ; BG Mode 1
     lda #%0000_1_001
     sta BGMODE
 
-    lda <joyHeld
-
     ; Enable Display
     lda #$0F
     sta INIDISP
 
-    jmp *
+    bra *

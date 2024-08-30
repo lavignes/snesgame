@@ -16,9 +16,9 @@ SLOWROM4 = { start = "$3F8000", size = "$8000",   type = "ro", fill = "$00" }
 
 [SECTIONS]
 ZEROPAGE   = { load = "ZEROPAGE", type = "dp" }
-LORAM      = { load = "LORAM",    type = "bss" }
-WRAM0      = { load = "WRAM0",    type = "bss" }
-WRAM1      = { load = "WRAM1",    type = "bss" }
+LORAM      = { load = "LORAM",    type = "bss", define = true }
+WRAM0      = { load = "WRAM0",    type = "bss", define = true }
+WRAM1      = { load = "WRAM1",    type = "bss", define = true }
 
 CORE       = { load = "FASTROM",  type = "ro" }
 

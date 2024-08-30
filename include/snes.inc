@@ -2,6 +2,26 @@
 \ifndef _SNES_INC
 _SNES_INC = 1
 
+\macro SET_A8
+    \accum8
+    rep #$10
+\end
+
+\macro SET_I16
+    \index16
+    sep #$20
+\end
+
+\macro SET_A8I16
+    SET_A8
+    SET_I16
+\end
+
+\macro SET_A16I16
+    \accum16 \index16
+    sep #$30
+\end
+
 ;; LoOAM Table OBJ Structure
 ;;
 ;; LoOAM Makes up the first 512 Words of OAM (128 OBJs)
@@ -203,12 +223,65 @@ CGDATA = $2122
 ;;
 CGDATAREAD = $213B
 
+;; DMA Enable (W)
+;;
+MDMAEN = $420B
+
+;; HDMA Enable (W)
+;;
+;; Fields: 76543210
+;; 0 - Channel 0 HMDA Enable
+;; 1 - Channel 1 HMDA Enable
+;; 2 - Channel 2 HMDA Enable
+;; 3 - Channel 3 HMDA Enable
+;; 4 - Channel 4 HMDA Enable
+;; 5 - Channel 5 HMDA Enable
+;; 6 - Channel 6 HMDA Enable
+;; 7 - Channel 7 HMDA Enable
+;;
+HDMAEN = $420C
+
+;; DMAPn
+\loop n, 8
+    \join DMAP, n = ($4300 + (n << 4))
+\end
+
+;; BBADn
+\loop n, 8
+    \join BBAD, n = ($4301 + (n << 4))
+\end
+
+;; A1Tn
+\loop n, 8
+    \join A1T, n, L = ($4302 + (n << 4))
+    \join A1T, n, H = ($4303 + (n << 4))
+\end
+
+;; A1Bn
+\loop n, 8
+    \join A1B, n = ($4304 + (n << 4))
+\end
+
+;; DASnL
+\loop n, 8
+    \join DAS, n, L = ($4305 + (n << 4))
+    \join DAS, n, H = ($4306 + (n << 4))
+\end
+
 ;; ROM Speed (W)
 ;;
 ;; Fields: .......s
 ;; s - (0 = 2.68MHz, 1 = 3.58MHz)
 ;;
 ROMSEL = $420D
+
+;; WRAM Data (R/W)
+WMDATA = $2180
+
+;; WRAM Address (W)
+WMADDL = $2181
+WMADDM = $2182
+WMADDH = $2183
 
 ;; Interrupt and Joypad Auto-Read (W)
 ;;
@@ -228,12 +301,20 @@ ROMSEL = $420D
 ;;
 NMITIMEN = $4200
 
+;; NMI VBlank Flag and CPU Version (R)
+;;
+;; Fields: v...nnnn
+;; v    - NMI Active (Does not flip during forced blank/NMI disabled)
+;; nnnn - CPU Version
+;;
+RDNMI = $4210
+
 ;; Screen and Joypad Status (R)
 ;;
 ;; Fields: vh.....j
 ;; j - Joypad Auto-Read in-progress
-;; h - HBlank Active
-;; v - VBlank Active
+;; h - HBlank Active (Continues to change even if VBlank forced)
+;; v - VBlank Active (Continues to change even if VBlank forced)
 ;;
 HVBJOY = $4212
 
