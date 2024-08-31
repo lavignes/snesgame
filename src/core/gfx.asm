@@ -15,11 +15,65 @@ gfxNmiFlags: \res 1
 \native \index16 \accum8
 
 GfxInit::
-    ; Disable Display
+    ; Force vblank, full brightness
     lda #$8F
     sta INIDISP
 
-    ; TODO: clear registers to initial state
+    stz OBJSEL
+    stz OAMADDL
+    stz OAMADDH
+
+    stz BGMODE
+    stz MOSAIC
+    stz BG1SC
+    stz BG2SC
+    stz BG3SC
+    stz BG4SC
+    stz BG12NBA
+    stz BG34NBA
+
+    stz SETINI
+
+    ; HScroll=0 VScroll=-1
+    lda #<-1
+    stz BG1HOFS
+    stz BG1HOFS
+    sta BG1VOFS
+    sta BG1VOFS
+    stz BG2HOFS
+    stz BG2HOFS
+    sta BG2VOFS
+    sta BG2VOFS
+    stz BG3HOFS
+    stz BG3HOFS
+    sta BG3VOFS
+    sta BG3VOFS
+    stz BG4HOFS
+    stz BG4HOFS
+    sta BG4VOFS
+    sta BG4VOFS
+
+    stz W12SEL
+    stz W34SEL
+    stz WOBJSEL
+    stz WH0
+    stz WH1
+    stz WH2
+    stz WH3
+    stz WBGLOG
+    stz WOBJLOG
+
+    stz TM
+    stz TS
+    stz TMW
+    stz TSW
+
+    lda #$30
+    sta CGWSEL
+    stz CGADSUB
+    lda #$E0
+    sta COLDATA
+
     rts
 
 GfxNmi::

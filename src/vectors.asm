@@ -2,17 +2,6 @@
 
 \native
 
-\section "VECTORJUMP"
-; Because our vectors are in slow rom, we need to jump to fast rom
-Reset:
-    jml @StartReset
-Nmi:
-    jml @GfxNmi
-Irq:
-    jml @TimeIrq
-Break:
-    jml @DbgBrk
-
 \section "VECTORS"
 ; Native Mode Vectors
 \word 0, 0      ; (reserved)
@@ -32,3 +21,13 @@ Break:
 \word |Reset    ; RESET
 \word |Irq      ; IRQ
 
+\section "VECTORJUMP"
+; Because our vectors are in slow rom, we need to jump to fast rom
+Reset:
+    jml @StartReset
+Nmi:
+    jml @GfxNmi
+Irq:
+    jml @TimeIrq
+Break:
+    jml @DbgBrk

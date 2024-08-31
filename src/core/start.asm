@@ -1,8 +1,6 @@
 ; vim: ft=nyasm
 
 \include "snes.inc"
-\include "color.inc"
-\include "joy.inc"
 
 \section "CORE"
 \native \index16 \accum8
@@ -15,10 +13,6 @@ StartReset::
     clc
     xce
     SET_A8I16
-
-    ; Enable FastROM
-    lda #1
-    sta ROMSEL
 
     ; Setup stack
     ldx #$02FF
@@ -38,15 +32,16 @@ StartReset::
 
     ; Clear LoRAM really inefficiently
     ; We need to at least clear the stack before JSRing
-    ldx #|(__LORAM_START__ + __LORAM_SIZE__)
-.ClearStack:
+    ldx #|__WRAM0_START__
+.ClearLoRAM:
     dex
     stz |$0000,X
-    bne .ClearStack
+    bne .ClearLoRAM
 
     jsr GfxInit
     jsr MemInit
     jsr JoyInit
+    jsr TimeInit
 
     ; BG Mode 1
     lda #%0000_1_001

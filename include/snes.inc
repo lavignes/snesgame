@@ -56,6 +56,8 @@ _SNES_INC = 1
 ;;
 INIDISP = $2100
 
+SETINI = $2133
+
 ;; OBJ Size and CHR Address (W)
 ;;
 ;; Fields: sssnn.bb
@@ -77,7 +79,7 @@ OBJSEL = $2101
 ;; Fields: p.....h aaaaaaaa
 ;; aaaaaaaa - OAM Word Address
 ;; h        - OAM Table Select (0 = LoOAM, 1 = HiOAM)
-;; p        - OAM Priority Rotation (0 = Disable, 1 = Enable)
+;; p        - Enable OAM Priority Rotation
 ;;            TODO: better docs
 ;;
 OAMADDL = $2102
@@ -145,6 +147,80 @@ BG2VOFS = $2110
 BG3VOFS = $2112
 BG4VOFS = $2114
 
+;; Screen Pixelation (W)
+;;
+;; Fields: ssss4321
+;; 1    - Enable BG1 mosaic
+;; 2    - Enable BG2 mosaic
+;; 3    - Enable BG3 mosaic
+;; 4    - Enable BG4 mosaic
+;; ssss - Pixel Size ($0 = 1x1, ... $F = 16x16)
+;;
+MOSAIC = $2106
+
+;; Window Settings BG1/3 and BG2/4 (W)
+;;
+;; Fields: DdCcBbAa
+;; a - Invert window 1 for BG1/3
+;; A - Enable window 1 for BG1/3
+;; b - Invert window 2 for BG1/3
+;; B - Enable window 2 for BG1/3
+;; c - Invert window 1 for BG2/4
+;; C - Enable window 1 for BG2/4
+;; d - Invert window 2 for BG2/4
+;; D - Enable window 2 for BG2/4
+;;
+W12SEL = $2123
+W34SEL = $2124
+
+;; Window Settings for OBJ and Color Window (W)
+;;
+;; Fields: DdCcBbAa
+;; a - Invert window 1 for OBJ
+;; A - Enable window 1 for OBJ
+;; b - Invert window 2 for OBJ
+;; B - Enable window 2 for OBJ
+;; c - Invert window 1 for color
+;; C - Enable window 1 for color
+;; d - Invert window 2 for color
+;; D - Enable window 2 for color
+;;
+WOBJSEL = $2125
+
+;; Window 1 Left/Right Edge Position (W)
+;;
+;; Fields: llllllll
+;; llllllll - Position
+;;
+WH0 = $2126
+WH1 = $2127
+
+;; Window 2 Left/Right Edge Position (W)
+;;
+;; Fields: llllllll
+;; llllllll - Position
+;;
+WH2 = $2128
+WH3 = $2129
+
+;; Window BG Mask Logic (W)
+;;
+;; Fields: 44332211
+;; 11 - BG1 (0 = OR, 1 = AND, 2 = XOR, 3 = XNOR)
+;; 22 - BG2 (0 = OR, 1 = AND, 2 = XOR, 3 = XNOR)
+;; 33 - BG3 (0 = OR, 1 = AND, 2 = XOR, 3 = XNOR)
+;; 44 - BG4 (0 = OR, 1 = AND, 2 = XOR, 3 = XNOR)
+;;
+WBGLOG = $212A
+
+;; Window OBK and Color Mask Logic
+;;
+;; Fields: ....ccoo
+;; oo - OBJ (0 = OR, 1 = AND, 2 = XOR, 3 = XNOR)
+;; cc - Color Window (0 = OR, 1 = AND, 2 = XOR, 3 = XNOR)
+;;
+WOBJLOG = $212B
+
 ;; Main Screen Enable (W)
 ;;
 ;; Fields: ...o4321
@@ -158,7 +234,7 @@ TM = $212C
 
 ;; Subscreen Enable (W)
 ;;
-;; Fields: ...O4321
+;; Fields: ...o4321
 ;; 1 - BG1
 ;; 2 - BG2
 ;; 3 - BG3
@@ -166,6 +242,34 @@ TM = $212C
 ;; o - OBJ
 ;;
 TS = $212D
+
+;; Main Screen Enable Window (W)
+;;
+;; Fields: ...o4321
+;; 1 - BG1
+;; 2 - BG2
+;; 3 - BG3
+;; 4 - BG4
+;; o - OBJ
+;;
+TMW = $212E
+
+;; Subscreen Enable Window (W)
+;;
+;; Fields: ...o4321
+;; 1 - BG1
+;; 2 - BG2
+;; 3 - BG3
+;; 4 - BG4
+;; o - OBJ
+;;
+TSW = $212F
+
+CGWSEL = $2130
+
+CGADSUB = $2131
+
+COLDATA = $2132
 
 ;; VRAM Port Control (W)
 ;;
@@ -193,12 +297,12 @@ TS = $212D
 VMAIN = $2115
 
 ;; VRAM Address (W)
-VMADDL = $2117
-VMADDH = $2118
+VMADDL = $2116
+VMADDH = $2117
 
 ;; VRAM Data Write (W)
-VMDATAL = $2119
-VMDATAH = $211A
+VMDATAL = $2118
+VMDATAH = $2119
 
 ;; VRAM Data Read (H)
 ;;

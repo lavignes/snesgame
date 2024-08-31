@@ -15,6 +15,7 @@ JoyInit::
     ; Enable joypad auto-read
     lda NMITIMEN
     ora #1
+    sta NMITIMEN
 
     rts
 
