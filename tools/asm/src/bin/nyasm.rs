@@ -705,7 +705,7 @@ impl<'a> Asm<'a> {
 
     fn expr_push_apply(&mut self, op: Op) {
         while let Some(top) = self.operator_buffer.last().copied() {
-            if self.expr_precedence(top) > self.expr_precedence(op) {
+            if self.expr_precedence(top) >= self.expr_precedence(op) {
                 break;
             }
             self.operator_buffer.pop();
@@ -2032,7 +2032,7 @@ impl<'a> Asm<'a> {
             inner: mac,
             unique: self.unique,
             index: 0,
-            join_buf: String::new(),
+            fmt_buf: String::new(),
             args,
             arg_index: 0,
             pos,
@@ -2932,7 +2932,7 @@ struct MacroInvocation<'a> {
     inner: Macro<'a>,
     unique: usize,
     index: usize,
-    join_buf: String,
+    fmt_buf: String,
     args: VecDeque<&'a [(Pos<'a>, MacroTok<'a>)]>,
     arg_index: usize,
     pos: Pos<'a>,
@@ -2985,23 +2985,23 @@ impl<'a> TokStream<'a> for MacroInvocation<'a> {
                 Ok(Tok::NEWLINE)
             }
             (_, MacroTok::Uniq) => {
-                self.join_buf.clear();
-                write!(&mut self.join_buf, "_{}", self.unique).unwrap();
+                self.fmt_buf.clear();
+                write!(&mut self.fmt_buf, "_{}", self.unique).unwrap();
                 Ok(Tok::ID)
             }
             (_, MacroTok::Join(toks)) => {
-                self.join_buf.clear();
+                self.fmt_buf.clear();
                 for (_, tok) in toks {
                     match tok {
-                        MacroTok::Id(string) => self.join_buf.push_str(string),
-                        MacroTok::Str(string) => self.join_buf.push_str(string),
-                        MacroTok::Num(val) => write!(&mut self.join_buf, "{val:X}").unwrap(),
+                        MacroTok::Id(string) => self.fmt_buf.push_str(string),
+                        MacroTok::Str(string) => self.fmt_buf.push_str(string),
+                        MacroTok::Num(val) => write!(&mut self.fmt_buf, "{val:X}").unwrap(),
                         MacroTok::Arg(index) => match self.args[*index][self.arg_index] {
-                            (_, MacroTok::Str(string)) => self.join_buf.push_str(string),
-                            (_, MacroTok::Id(string)) => self.join_buf.push_str(string),
+                            (_, MacroTok::Str(string)) => self.fmt_buf.push_str(string),
+                            (_, MacroTok::Id(string)) => self.fmt_buf.push_str(string),
                             _ => unreachable!(),
                         },
-                        MacroTok::Uniq => write!(&mut self.join_buf, "_{}", self.unique).unwrap(),
+                        MacroTok::Uniq => write!(&mut self.fmt_buf, "_{}", self.unique).unwrap(),
                         _ => unreachable!(),
                     }
                 }
@@ -3052,8 +3052,8 @@ impl<'a> TokStream<'a> for MacroInvocation<'a> {
                 (_, MacroTok::Id(string)) => string,
                 _ => unreachable!(),
             },
-            (_, MacroTok::Join(_)) => &self.join_buf,
-            (_, MacroTok::Uniq) => &self.join_buf,
+            (_, MacroTok::Join(_)) => &self.fmt_buf,
+            (_, MacroTok::Uniq) => &self.fmt_buf,
             _ => unreachable!(),
         }
     }
