@@ -1,5 +1,9 @@
 ; vim: ft=nyasm
 
+\section "LORAM"
+
+timeShadowNMITIMEN:: \res 1
+
 \section "CORE"
 \native \index16 \accum8
 

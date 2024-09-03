@@ -7,7 +7,7 @@ syn match nyasmLocalLabel "^\.[a-z_][a-z0-9_]*"
 
 syn keyword nyasmRegister a x y
 
-syn match nyasmOperator display "\%(+\|-\|/\|*\|\^\|\~\|&\||\|!\|>\|<\|%\|=\)=\?"
+syn match nyasmOperator display "\%(+\|-\|/\|*\|\^\|\~\|&\||\|!\|>\|<\|%\|=\|`\)=\?"
 syn match nyasmOperator display "&&\|||\|<<\|>>\|\~>"
 
 syn keyword nyasmOpcode adc and asl bcc bcs beq bit bmi bne bpl bra brk brl bvc bvs

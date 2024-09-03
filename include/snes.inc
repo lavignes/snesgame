@@ -2,26 +2,6 @@
 \ifndef _SNES_INC
 _SNES_INC = 1
 
-\macro SET_A8
-    \accum8
-    rep #$10
-\end
-
-\macro SET_I16
-    \index16
-    sep #$20
-\end
-
-\macro SET_A8I16
-    SET_A8
-    SET_I16
-\end
-
-\macro SET_A16I16
-    \accum16 \index16
-    sep #$30
-\end
-
 ;; LoOAM Table OBJ Structure
 ;;
 ;; LoOAM Makes up the first 512 Words of OAM (128 OBJs)
@@ -55,6 +35,10 @@ _SNES_INC = 1
 ;; f    - Force VBlank
 ;;
 INIDISP = $2100
+INIDISP_FULLDARK   = $0
+INIDISP_FULLBRIGHT = $F
+INIDISP_DISABLE = %1 << 7
+INIDISP_ENABLE  = %0 << 7
 
 SETINI = $2133
 
@@ -63,16 +47,33 @@ SETINI = $2133
 ;; Fields: sssnn.bb
 ;; bb  - First CHR Bank Address (16KiB VRAM page)
 ;; nn  - Second CHR Bank Offset (8KiB VRAM page following bb)
-;; sss - OBJ Size (0 = 8x8, 16x16)
-;;                (1 = 8x8, 32x32)
-;;                (2 = 8x8, 64x64)
-;;                (3 = 16x16, 32x32)
-;;                (4 = 16x16, 64x64)
-;;                (5 = 32x32, 64x64)
-;;                (6 = 16x32, 32x64)
-;;                (7 = 16x32, 32x32)
+;; sss - OBJ Size
+;;       (0 = 8x8, 16x16)
+;;       (1 = 8x8, 32x32)
+;;       (2 = 8x8, 64x64)
+;;       (3 = 16x16, 32x32)
+;;       (4 = 16x16, 64x64)
+;;       (5 = 32x32, 64x64)
+;;       (6 = 16x32, 32x64)
+;;       (7 = 16x32, 32x32)
 ;;
 OBJSEL = $2101
+OBJSEL_BANK0_0000 = %00
+OBJSEL_BANK0_4000 = %01
+OBJSEL_BANK0_8000 = %10
+OBJSEL_BANK0_C000 = %11
+OBJSEL_BANK1_0000 = %00 << 3
+OBJSEL_BANK1_2000 = %01 << 3
+OBJSEL_BANK1_4000 = %10 << 3
+OBJSEL_BANK1_6000 = %11 << 3
+OBJSEL_8X8_16X16   = 0 << 5
+OBJSEL_8X8_32X32   = 1 << 5
+OBJSEL_8X8_64X64   = 2 << 5
+OBJSEL_16X16_32X32 = 3 << 5
+OBJSEL_16X16_64X64 = 4 << 5
+OBJSEL_32X32_64X64 = 5 << 5
+OBJSEL_16X32_32X64 = 6 << 5
+OBJSEL_16X32_32X32 = 7 << 5
 
 ;; OAM Address (W)
 ;;
@@ -80,7 +81,6 @@ OBJSEL = $2101
 ;; aaaaaaaa - OAM Word Address
 ;; h        - OAM Table Select (0 = LoOAM, 1 = HiOAM)
 ;; p        - Enable OAM Priority Rotation
-;;            TODO: better docs
 ;;
 OAMADDL = $2102
 OAMADDH = $2103
@@ -213,7 +213,7 @@ WH3 = $2129
 ;;
 WBGLOG = $212A
 
-;; Window OBK and Color Mask Logic
+;; Window OBJ and Color Mask Logic
 ;;
 ;; Fields: ....ccoo
 ;; oo - OBJ (0 = OR, 1 = AND, 2 = XOR, 3 = XNOR)
@@ -231,6 +231,11 @@ WOBJLOG = $212B
 ;; o - OBJ
 ;;
 TM = $212C
+TM_BG1 = %1 << 0
+TM_BG2 = %1 << 1
+TM_BG3 = %1 << 2
+TM_BG4 = %1 << 3
+TM_OBJ = %1 << 4
 
 ;; Subscreen Enable (W)
 ;;
@@ -242,6 +247,11 @@ TM = $212C
 ;; o - OBJ
 ;;
 TS = $212D
+TS_BG1 = %1 << 0
+TS_BG2 = %1 << 1
+TS_BG3 = %1 << 2
+TS_BG4 = %1 << 3
+TS_OBJ = %1 << 4
 
 ;; Main Screen Enable Window (W)
 ;;
@@ -295,6 +305,15 @@ COLDATA = $2132
 ;;                     (1 = After access of VMDATAH/VMDATAHREAD)
 ;;
 VMAIN = $2115
+VMAIN_INCREMENT_1WORD   = %00
+VMAIN_INCREMENT_32WORD  = %01
+VMAIN_INCREMENT_128WORD = %10
+VMAIN_REMAP_NONE = %00 << 2
+VMAIN_REMAP_2BPP = %01 << 2
+VMAIN_REMAP_4BPP = %10 << 2
+VMAIN_REMAP_8BPP = %11 << 2
+VMAIN_INCREMENT_LO = %0 << 7
+VMAIN_INCREMENT_HI = %1 << 7
 
 ;; VRAM Address (W)
 VMADDL = $2116
@@ -329,44 +348,100 @@ CGDATAREAD = $213B
 
 ;; DMA Enable (W)
 ;;
+;; Fields: 76543210
+;; 0 - Channel 0 DMA Enable
+;; 1 - Channel 1 DMA Enable
+;; 2 - Channel 2 DMA Enable
+;; 3 - Channel 3 DMA Enable
+;; 4 - Channel 4 DMA Enable
+;; 5 - Channel 5 DMA Enable
+;; 6 - Channel 6 DMA Enable
+;; 7 - Channel 7 DMA Enable
+;;
 MDMAEN = $420B
 
 ;; HDMA Enable (W)
 ;;
 ;; Fields: 76543210
-;; 0 - Channel 0 HMDA Enable
-;; 1 - Channel 1 HMDA Enable
-;; 2 - Channel 2 HMDA Enable
-;; 3 - Channel 3 HMDA Enable
-;; 4 - Channel 4 HMDA Enable
-;; 5 - Channel 5 HMDA Enable
-;; 6 - Channel 6 HMDA Enable
-;; 7 - Channel 7 HMDA Enable
+;; 0 - Channel 0 HDMA Enable
+;; 1 - Channel 1 HDMA Enable
+;; 2 - Channel 2 HDMA Enable
+;; 3 - Channel 3 HDMA Enable
+;; 4 - Channel 4 HDMA Enable
+;; 5 - Channel 5 HDMA Enable
+;; 6 - Channel 6 HDMA Enable
+;; 7 - Channel 7 HDMA Enable
 ;;
 HDMAEN = $420C
 
-;; DMAPn
+;; DMA Parameters (DMAPn) (R/W)
+;;
+;; Fields di.aappp
+;; ppp - Transter pattern
+;;
+;;       The transfer pattern defines how the DMA controller writes
+;;       to the B bus. For example, if the B bus address is set to
+;;       VMDATAL and the pattern is 1, DMA writes will aternate between
+;;       addresses VMDATAL+0 and VMDATAL+1 (i.e. VMDATAH).
+;;
+;;       (0 = [+0] e.g. WRAM, Tilemap)
+;;       (1 = [+0, +1] e.g. VRAM)
+;;       (2 = [+0, +0] e.g. OAM, CGRAM)
+;;       (3 = [+0, +0, +1, +1] e.g. Scroll Positions)
+;;       (4 = [+0, +1, +2, +3] e.g. Window)
+;;       (5 = [+0, +1, +0, +1] Undocumented)
+;;       (6 = Same as 2)
+;;       (7 = Same as 3)
+;;
+;; aa  - A Bus Address Adjust Mode
+;;       (0 = Increment A Bus Address)
+;;       (1 = Fixed)
+;;       (2 = Decrement A Bus Address)
+;;       (3 = Fixed)
+;;
+;; i   - Indirect (NOTE: Only use in HDMA) TODO: Explain?
+;; d   - Direction (0 = A->B, B->A)
+;;
 \loop n, 8
     \join DMAP, n = ($4300 + (n << 4))
 \end
+DMAP_PATTERN_0     = %000
+DMAP_PATTERN_01    = %001
+DMAP_PATTERN_00    = %010
+DMAP_PATTERN_0011  = %011
+DMAP_PATTERN_0123  = %100
+DMAP_PATTERN_0101  = %101
+DMAP_ABUS_INCREMENT = %00 << 3
+DMAP_ABUS_FIXED     = %01 << 3
+DMAP_ABUS_DECREMENT = %10 << 3
+DMAP_HDMAINDIRECT   = %1 << 6
+DMAP_A2B            = %0 << 7
+DMAP_B2A            = %1 << 7
 
-;; BBADn
+;; B Bus Address (BBADn) (R/W)
+;;
+;; Fields: aaaaaaaa
+;; Sets B Bus Address to $2100 + %aaaaaaaa
 \loop n, 8
     \join BBAD, n = ($4301 + (n << 4))
 \end
 
-;; A1Tn
+;; A Bus Address (A1Bn, A1TnH, A1TnL) (R/W)
+;;
+;; Fields: bbbbbbbb hhhhhhhh llllllll
+;; Sets A Bus Address to A1Bn (Bank)
+;;                       A1TnH (Page)
+;;                       A1TnL (Offset)
 \loop n, 8
     \join A1T, n, L = ($4302 + (n << 4))
     \join A1T, n, H = ($4303 + (n << 4))
-\end
-
-;; A1Bn
-\loop n, 8
     \join A1B, n = ($4304 + (n << 4))
 \end
 
-;; DASnL
+;; DMA Transfer Size (DASnH, DASnL) (R/W)
+;;
+;; NOTE: A transfer size of 0 corresponds to a full bank (65536 bytes)
+;;
 \loop n, 8
     \join DAS, n, L = ($4305 + (n << 4))
     \join DAS, n, H = ($4306 + (n << 4))
@@ -378,6 +453,7 @@ HDMAEN = $420C
 ;; s - (0 = 2.68MHz, 1 = 3.58MHz)
 ;;
 ROMSEL = $420D
+ROMSEL_FASTROM = 1
 
 ;; WRAM Data (R/W)
 WMDATA = $2180
@@ -397,19 +473,27 @@ WMADDH = $2183
 ;;      NOTE: Check status of auto-read in HVBJOY1
 ;;
 ;; tt - Enable IRQs for H and VBlank Timers
-;;                      (00 = No IRQs)
-;;                      (01 = IRQ when H counter == HTIME)
-;;                      (10 = IRQ when V counter == VTIME and H counter == 0)
-;;                      (11 = IRQ when V counter == VTIME and H counter == HTIME)
+;;      (0 = No IRQs)
+;;      (1 = IRQ when H counter == HTIME)
+;;      (2 = IRQ when V counter == VTIME and H counter == 0)
+;;      (3 = IRQ when V counter == VTIME and H counter == HTIME)
+;;
 ;; n - VBlank NMI (0 = Disable, 1 = Enable)
 ;;
 NMITIMEN = $4200
+NMITIMEN_JOY_AUTOREAD = %1
+NMITIMEN_IRQ_NONE         = %00 << 1
+NMITIMEN_IRQ_HTIME        = %01 << 1
+NMITIMEN_IRQ_VTIME_HZERO  = %10 << 1
+NMITIMEN_IRQ_VTIME_HTIME  = %11 << 1
+NMITIMEN_NMI_ENABLE = %1 << 7
 
 ;; NMI VBlank Flag and CPU Version (R)
 ;;
 ;; Fields: v...nnnn
 ;; v    - NMI Active (Does not flip during forced blank/NMI disabled)
 ;; nnnn - CPU Version
+;;
 ;;
 RDNMI = $4210
 

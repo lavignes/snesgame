@@ -1,5 +1,6 @@
 ; vim: ft=nyasm
 
+\include "asm.inc"
 \include "snes.inc"
 
 \section "ZEROPAGE"
@@ -12,9 +13,9 @@ joyHeld:: \res 2
 \native \index16 \accum8
 
 JoyInit::
-    ; Enable joypad auto-read
-    lda NMITIMEN
-    ora #1
+    lda |`timeShadowNMITIMEN
+    ora #NMITIMEN_JOY_AUTOREAD
+    sta |`timeShadowNMITIMEN
     sta NMITIMEN
 
     rts
@@ -22,8 +23,9 @@ JoyInit::
 JoyUpdate::
     ; If auto-read is still running, wait
     lda #1
+.Wait:
     bit HVBJOY
-    beq JoyUpdate
+    beq .Wait
 
     SET_A16I16
     ; Compute held by AND with last pressed

@@ -291,6 +291,7 @@ impl Tok {
     pub const RBRACKET: Self = Self(b']');
     pub const BANG: Self = Self(b'!');
     pub const TILDE: Self = Self(b'~');
+    pub const TICK: Self = Self(b'`');
     pub const HASH: Self = Self(b'#');
     pub const COMMA: Self = Self(b',');
     pub const COLON: Self = Self(b':');

@@ -462,7 +462,6 @@ impl<'a> Asm<'a> {
                     };
 
                     match self.peek()? {
-                        // optional colon
                         Tok::COLON => {
                             self.eat();
                         }
@@ -498,7 +497,7 @@ impl<'a> Asm<'a> {
                             self.eol()?;
                             continue;
                         }
-                        _ => {}
+                        _ => return Err(self.err("expected ':' or '='")),
                     }
                     // set the scope
                     if !string.starts_with(".") {
@@ -737,7 +736,7 @@ impl<'a> Asm<'a> {
                     continue;
                 }
                 // these are optionally unary
-                tok @ (Tok::PLUS | Tok::MINUS | Tok::CARET | Tok::LT | Tok::PIPE | Tok::GT) => {
+                tok @ (Tok::PLUS | Tok::MINUS | Tok::CARET | Tok::LT | Tok::GT) => {
                     if seen_val {
                         self.expr_push_apply(Op::Binary(tok));
                     } else {
@@ -748,14 +747,14 @@ impl<'a> Asm<'a> {
                     continue;
                 }
                 // always unary
-                tok @ (Tok::BANG | Tok::TILDE) => {
+                tok @ (Tok::BANG | Tok::TILDE | Tok::TICK) => {
                     self.expr_push_apply(Op::Unary(tok));
                     seen_val = false;
                     self.eat();
                     continue;
                 }
                 #[rustfmt::skip]
-                tok @ (Tok::AMP | Tok::AND | Tok::LOR | Tok::SOLIDUS | Tok::MODULUS
+                tok @ (Tok::AMP | Tok::AND | Tok::LOR | Tok::SOLIDUS | Tok::MODULUS | Tok::PIPE
                        | Tok::ASL | Tok::ASR | Tok::LSR | Tok::LTE | Tok::GTE | Tok::LEQ | Tok::NEQ
                       ) => {
                     if !seen_val {
@@ -933,7 +932,7 @@ impl<'a> Asm<'a> {
                         Op::Unary(Tok::TILDE) => scratch.push(!rhs),
                         Op::Unary(Tok::BANG) => scratch.push((rhs == 0) as i32),
                         Op::Unary(Tok::LT) => scratch.push(((rhs as u32) & 0xFF) as i32),
-                        Op::Unary(Tok::PIPE) => scratch.push(((rhs as u32) & 0xFFFF) as i32),
+                        Op::Unary(Tok::TICK) => scratch.push(((rhs as u32) & 0xFFFF) as i32),
                         Op::Unary(Tok::GT) => scratch.push((((rhs as u32) & 0xFF00) >> 8) as i32),
                         Op::Unary(Tok::CARET) => {
                             scratch.push((((rhs as u32) & 0xFF0000) >> 16) as i32)
