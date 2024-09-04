@@ -20,7 +20,7 @@ gfxOamShadow:: \res 544
 \native \index16 \accum8
 
 GfxInit::
-    lda #(INIDISP_FULLBRIGHT | INIDISP_DISABLE)
+    lda #(INIDISP_FULLBRIGHT | INIDISP_FORCE_VBLANK)
     sta INIDISP
 
     stz OBJSEL
@@ -81,6 +81,7 @@ GfxInit::
 
     jsr GfxVramClear
     jsr GfxCgramClear ; TODO: xfer shadow cgram? Do we need shadow cgram?
+
     ; Safe to assume WRAM is clear
     jsr GfxOamTransfer
 
@@ -99,7 +100,7 @@ GfxVramClear:
     lda #<VMDATAL
     sta BBAD0
     ; Increment VMADD every word
-    lda #(VMAIN_INCREMENT_HI)
+    lda #VMAIN_INCREMENT_HI
     sta VMAIN
     stz VMADDL
     stz VMADDH

@@ -71,9 +71,33 @@ StartReset::
     lda #1
     sta BGMODE
 
+    ; TRANSFER SPRITE DATA
+    ; A Bus
+    ldx #`Sprite
+    stx A1T0L
+    lda #^Sprite
+    sta A1B0
+    ; TILE->VRAM
+    lda #(DMAP_PATTERN_01 | DMAP_ABUS_INCREMENT | DMAP_A2B)
+    sta DMAP0
+    ; B Bus: Start of VRAM
+    lda #<VMDATAL
+    sta BBAD0
+    ; Increment VMADD every word
+    lda #VMAIN_INCREMENT_HI
+    sta VMAIN
+    stz VMADDL
+    stz VMADDH
+    ; Length
+    ldx #(SpriteEnd-Sprite)
+    stx DAS0L
+    ; Execute
+    lda #1
+    sta MDMAEN
+
     ; Enable NMI
     lda |`timeShadowNMITIMEN
-    ora #NMITIMEN_NMI_ENABLE
+    ora #NMITIMEN_NMI
     sta |`timeShadowNMITIMEN
     sta NMITIMEN
 
@@ -84,16 +108,16 @@ StartReset::
 
     lda #$81
     sta CGADD
-    lda #<COLOR_RGB24 $FF, $00, $00
+    lda #<COLOR_WHITE
     sta CGDATA
-    lda #>COLOR_RGB24 $FF, $00, $00
+    lda #>COLOR_WHITE
     sta CGDATA
 
     lda #32
     sta |`(gfxOamShadow+OAMOBJ.X)
     sta |`(gfxOamShadow+OAMOBJ.Y)
 
-    lda #(INIDISP_FULLBRIGHT | INIDISP_ENABLE)
+    lda #INIDISP_FULLBRIGHT
     sta INIDISP
 
 .MainLoop:
@@ -109,5 +133,31 @@ StartReset::
     bra .MainLoop
 
 Sprite:
-    \byte %0000_0001
-    \byte %0000_0000
+    \byte %11111111
+    \byte %00000000
+
+    \byte %10000001
+    \byte %00000000
+
+    \byte %10000001
+    \byte %00000000
+
+    \byte %10000001
+    \byte %00000000
+
+    \byte %10000001
+    \byte %00000000
+
+    \byte %10000001
+    \byte %00000000
+
+    \byte %10000001
+    \byte %00000000
+
+    \byte %11111111
+    \byte %00000000
+
+    \loop _, 8
+        \word 0
+    \end
+SpriteEnd:

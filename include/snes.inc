@@ -37,8 +37,7 @@ _SNES_INC = 1
 INIDISP = $2100
 INIDISP_FULLDARK   = $0
 INIDISP_FULLBRIGHT = $F
-INIDISP_DISABLE = %1 << 7
-INIDISP_ENABLE  = %0 << 7
+INIDISP_FORCE_VBLANK = %1 << 7
 
 SETINI = $2133
 
@@ -288,18 +287,18 @@ COLDATA = $2132
 ;; rr - Address Remapping Control (0 = None, 1 = 2bpp, 2 = 4bpp, 3 = 8bpp)
 ;;
 ;;      When no remapping is done, VRAM writes ones CHR a time, going through
-;;      each bitplane of each row of that CHR. When enabled, VRAM writes will
+;;      each bitplane of each row of an 8x8 CHR. When enabled, VRAM writes will
 ;;      update the bitplanes of each row 32 of CHRs at a time.
 ;;      Obviously, this is intended for an 32x32 Tilemap with 8x8 tiles.
 ;;
-;;      Example sequential writes for the top-left 3 pixels in 8x8 tilemap @ 2bpp:
-;;      ----------------------------        ----------------------------
-;;      |write 1 |write 17|        |        |write 1 |write 3 |write 5 |
-;;      |write 2 |        |        |   vs   |write 2 |write 4 |........|
-;;      |--------|--------|--------|        |--------|--------|--------|
-;;      |write 3 |        |        |        |write 65|        |        |
-;;      |........|        |        |        |        |        |        |
-;;      ----------------------------        ----------------------------
+;;      To understand the pixel formats, start with 2bpp:
+;;      To encode an 8x8 CHR we need 8 words. Each alternative byte encodes
+;;      the bitplane for each pixel. ie. the first lo byte is bitplane 0
+;;      for row 0 of the CHR, and the hi byte of that word encodes bitplane 1.
+;;
+;;      NOTE: This alternating does *not* for additional bitplanes. For a 4bpp
+;;      CHR, the first 2 bitplanes are still in the first 8 words, then the
+;;      last two bitplanes are in the latter 8 words.
 ;;
 ;; m  - Increment Mode (0 = After access of VMDATAL/VMDATALREAD)
 ;;                     (1 = After access of VMDATAH/VMDATAHREAD)
@@ -486,7 +485,7 @@ NMITIMEN_IRQ_NONE         = %00 << 1
 NMITIMEN_IRQ_HTIME        = %01 << 1
 NMITIMEN_IRQ_VTIME_HZERO  = %10 << 1
 NMITIMEN_IRQ_VTIME_HTIME  = %11 << 1
-NMITIMEN_NMI_ENABLE = %1 << 7
+NMITIMEN_NMI = %1 << 7
 
 ;; NMI VBlank Flag and CPU Version (R)
 ;;
