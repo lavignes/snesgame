@@ -721,7 +721,7 @@ impl<'a> Asm<'a> {
         // sort of a pratt/shunting-yard algorithm combo
         loop {
             match self.peek()? {
-                // * is multiply or the absolute PC (as a section-relative address)
+                // * is multiply or the relative PC
                 Tok::STAR => {
                     if !seen_val {
                         self.expr_buffer.push(ExprNode::Const(self.pc() as i32));
