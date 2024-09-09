@@ -391,7 +391,7 @@ impl<'a> Asm<'a> {
                 self.eat();
                 continue;
             }
-            // special case, setting the PC
+            // special case, setting the relative PC
             if self.peek()? == Tok::STAR {
                 self.eat();
                 if self.peek()? != Tok::EQU {
@@ -721,17 +721,27 @@ impl<'a> Asm<'a> {
         // sort of a pratt/shunting-yard algorithm combo
         loop {
             match self.peek()? {
-                // star is multiply or the PC (as a section-relative address)
+                // * is multiply or the absolute PC (as a section-relative address)
                 Tok::STAR => {
                     if !seen_val {
-                        let section = self.sections[self.state().section].name;
-                        self.expr_buffer.push(ExprNode::Addr(section, self.pc()));
+                        self.expr_buffer.push(ExprNode::Const(self.pc() as i32));
                         seen_val = true;
                         self.eat();
                         continue;
                     }
                     self.expr_push_apply(Op::Binary(Tok::STAR));
                     seen_val = false;
+                    self.eat();
+                    continue;
+                }
+                // ** is the absolute PC (as a section-relative address)
+                Tok::DST => {
+                    if seen_val {
+                        return Err(self.err("expected operator"));
+                    }
+                    let section = self.sections[self.state().section].name;
+                    self.expr_buffer.push(ExprNode::Addr(section, self.pc()));
+                    seen_val = true;
                     self.eat();
                     continue;
                 }
@@ -1381,21 +1391,22 @@ impl<'a> Asm<'a> {
                     let op = self.check_opcode(mne.1, Addr::BM)?;
                     let src_pos = self.tok().pos();
                     let src = self.expr()?;
+                    self.expect(Tok::COMMA)?;
                     let dst_pos = self.tok().pos();
                     let dst = self.expr()?;
                     if self.emit {
                         self.write(&[op]);
-                        if let Ok(value) = self.const_expr(src) {
-                            self.write(&self.range_u8(value)?.to_le_bytes());
-                        } else {
-                            self.write(&[0xFD]);
-                            self.reloc(1, 1, src, src_pos, 0);
-                        }
                         if let Ok(value) = self.const_expr(dst) {
                             self.write(&self.range_u8(value)?.to_le_bytes());
                         } else {
                             self.write(&[0xFD]);
                             self.reloc(2, 1, dst, dst_pos, 0);
+                        }
+                        if let Ok(value) = self.const_expr(src) {
+                            self.write(&self.range_u8(value)?.to_le_bytes());
+                        } else {
+                            self.write(&[0xFD]);
+                            self.reloc(1, 1, src, src_pos, 0);
                         }
                     }
                     return self.add_pc(3);
@@ -1551,8 +1562,7 @@ impl<'a> Asm<'a> {
                                         let op = self.check_opcode(mne.1, Addr::ALX)?;
                                         if self.emit {
                                             self.write(&[op]);
-                                            self.write(&value.to_le_bytes());
-                                            self.write(&[0x00]);
+                                            self.write(&value.to_le_bytes()[..3]);
                                         }
                                         return self.add_pc(4);
                                     }
@@ -1577,8 +1587,7 @@ impl<'a> Asm<'a> {
                                 let op = self.check_opcode(mne.1, Addr::ABL)?;
                                 if self.emit {
                                     self.write(&[op]);
-                                    self.write(&value.to_le_bytes());
-                                    self.write(&[0x00]);
+                                    self.write(&value.to_le_bytes()[..3]);
                                 }
                                 return self.add_pc(4);
                             }
@@ -1590,8 +1599,7 @@ impl<'a> Asm<'a> {
                                 let op = self.check_opcode(mne.1, Addr::ALX)?;
                                 if self.emit {
                                     self.write(&[op]);
-                                    self.write(&value.to_le_bytes());
-                                    self.write(&[0x00]);
+                                    self.write(&value.to_le_bytes()[..3]);
                                 }
                                 return self.add_pc(4);
                             }
@@ -1599,8 +1607,7 @@ impl<'a> Asm<'a> {
                             let op = self.check_opcode(mne.1, Addr::ABL)?;
                             if self.emit {
                                 self.write(&[op]);
-                                self.write(&value.to_le_bytes());
-                                self.write(&[0x00]);
+                                self.write(&value.to_le_bytes()[..3]);
                             }
                             return self.add_pc(4);
                         }
@@ -1748,7 +1755,7 @@ impl<'a> Asm<'a> {
                             if self.emit {
                                 self.write(&[op]);
                                 if let Ok(value) = self.const_expr(expr) {
-                                    self.write(&self.range_u24(value)?.to_le_bytes());
+                                    self.write(&self.range_u24(value)?.to_le_bytes()[..3]);
                                 } else {
                                     self.write(&[0xFD, 0xFD, 0xFD]);
                                     self.reloc(1, 3, expr, pos, 0);
@@ -1761,7 +1768,7 @@ impl<'a> Asm<'a> {
                         if self.emit {
                             self.write(&[op]);
                             if let Ok(value) = self.const_expr(expr) {
-                                self.write(&self.range_u24(value)?.to_le_bytes());
+                                self.write(&self.range_u24(value)?.to_le_bytes()[..3]);
                             } else {
                                 // At link time, we want to warn on JMLs within the
                                 // same program bank.
@@ -1840,7 +1847,7 @@ impl<'a> Asm<'a> {
                     let expr = self.expr()?;
                     if self.emit {
                         if let Ok(value) = self.const_expr(expr) {
-                            self.write(&self.range_u24(value)?.to_le_bytes());
+                            self.write(&self.range_u24(value)?.to_le_bytes()[..3]);
                         } else {
                             self.write(&[0xFD, 0xFD, 0xFD]);
                             self.reloc(0, 3, expr, pos, 0);
@@ -2609,6 +2616,7 @@ const DIGRAPHS: &[(&[u8; 2], Tok)] = &[
     (b"&&", Tok::AND),
     (b"||", Tok::LOR),
     (b"::", Tok::DUB),
+    (b"**", Tok::DST),
 ];
 
 trait TokStream<'a> {

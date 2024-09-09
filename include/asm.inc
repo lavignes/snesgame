@@ -4,12 +4,12 @@ _ASM_INC = 1
 
 \macro SET_A8
     \accum8
-    rep #$10
+    sep #$20
 \end
 
 \macro SET_I16
     \index16
-    sep #$20
+    rep #$10
 \end
 
 \macro SET_A8I16
@@ -19,7 +19,7 @@ _ASM_INC = 1
 
 \macro SET_A16I16
     \accum16 \index16
-    sep #$30
+    rep #$30
 \end
 
 \end ; _ASM_INC

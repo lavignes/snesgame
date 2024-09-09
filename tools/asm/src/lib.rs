@@ -348,6 +348,7 @@ impl Tok {
     pub const AND: Self = Self(0xC7); // &&
     pub const LOR: Self = Self(0xC8); // ||
     pub const DUB: Self = Self(0xC9); // ::
+    pub const DST: Self = Self(0xCA); // **
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

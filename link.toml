@@ -1,7 +1,7 @@
 [MEMORY]
 ZEROPAGE = { start = "$800000", size = "$100",   type = "rw" }
-STACK    = { start = "$800100", size = "$200",   type = "rw" }
-LORAM    = { start = "$800300", size = "$1700",  type = "rw" }
+STACK    = { start = "$800100", size = "$100",   type = "rw" }
+LORAM    = { start = "$800200", size = "$1800",  type = "rw" }
 WRAM0    = { start = "$7E2000", size = "$E000",  type = "rw" }
 WRAM1    = { start = "$7F0000", size = "$10000", type = "rw" }
 

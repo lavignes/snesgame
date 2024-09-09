@@ -358,6 +358,9 @@ CGDATAREAD = $213B
 ;; 7 - Channel 7 DMA Enable
 ;;
 MDMAEN = $420B
+\loop n, 8
+    \join MDMAEN_, n = 1 << n
+\end
 
 ;; HDMA Enable (W)
 ;;
@@ -372,6 +375,9 @@ MDMAEN = $420B
 ;; 7 - Channel 7 HDMA Enable
 ;;
 HDMAEN = $420C
+\loop n, 8
+    \join HDMAEN_, n = 1 << n
+\end
 
 ;; DMA Parameters (DMAPn) (R/W)
 ;;

@@ -4,6 +4,13 @@
 \include "snes.inc"
 \include "color.inc"
 
+\section "ZEROPAGE"
+
+tmp:: \res 8
+src:: \res 2
+dst:: \res 2
+cnt:: \res 2
+
 \section "CORE"
 \native \index16 \accum8
 
@@ -31,7 +38,7 @@ StartReset::
     stz HDMAEN
 
     ; Setup stack
-    ldx #$02FF
+    ldx #$01FF
     txs
 
     ; Enable FastROM
@@ -59,11 +66,12 @@ StartReset::
         stz DAS0L
         stz DAS0H
         ; Execute
-        lda #1
+        lda #MDMAEN_0
         sta MDMAEN
     \end
 
     jsr GfxInit
+    jsr Lz4Init
     jsr TimeInit
     jsr JoyInit
     jsr ActInit
@@ -92,7 +100,7 @@ StartReset::
     ldx #(SpriteEnd-Sprite)
     stx DAS0L
     ; Execute
-    lda #1
+    lda #MDMAEN_0
     sta MDMAEN
 
     ; Enable NMI

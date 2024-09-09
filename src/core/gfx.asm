@@ -108,7 +108,7 @@ GfxVramClear:
     stz DAS0L
     stz DAS0H
     ; Execute
-    lda #1
+    lda #MDMAEN_0
     sta MDMAEN
     rts
 
@@ -129,7 +129,7 @@ GfxCgramClear:
     ldx #512
     stx DAS0L
     ; Execute
-    lda #1
+    lda #MDMAEN_0
     sta MDMAEN
     rts
 
@@ -151,7 +151,7 @@ GfxOamTransfer:
     ldx #544
     stx DAS0L
     ; Execute
-    lda #1
+    lda #MDMAEN_0
     sta MDMAEN
     rts
 
@@ -181,10 +181,6 @@ GfxNmi::
 
     phx
     phy
-
-    ; Cancel any spurious DMAs
-    ; TODO: Debug break if this is happening?
-    stz MDMAEN
 
     ; Do VRAM transfers here
     jsr GfxOamTransfer
