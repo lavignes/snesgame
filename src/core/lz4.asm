@@ -51,17 +51,18 @@ Lz4Flate::
 ; If L is 15, we keep reading bytes and adding
 ; them to L. When a byte is < 255 it is the last byte to add to L.
 ;
-; Then follows are L literal bytes. These are DMA'd directly to RAM.
+; Then follows are L literal bytes. These are DMA'd directly to WRAM.
 ;
 ; Afterwards is the offset word. This is used to source literal data
 ; previously ocurring in the stream. It is subtracted from the current
-; stream position for form the next DMA source.
+; stream position for the next DMA source.
 ; NOTE: If the offset is zero, then this is the final frame no more
 ; bytes will be present in the stream.
 ;
 ; Finally, like L, if M is 15 it will sum the final bytes in the frame to
 ; form the final 16-bit M. NOTE: Unlike L, we add 4 to M at the end.
-; So M will always represent 4 to 19 inclusive.
+; So M will always represent 4 to 19 inclusive. And we always perform
+; the DMA of M bytes at the offset to WRAM.
 
 .NextToken:
     lda $0000,X
