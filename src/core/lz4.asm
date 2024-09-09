@@ -67,16 +67,13 @@ Lz4Flate::
 .NextToken:
     lda $0000,X
     inx
-    ; Store token copy in B
-    tay
-    xba
-    tya
+    ; Store token copy on stack
+    pha
     ; Upper nibble is literal length
     lsr
     lsr
     lsr
     lsr
-    tay
     cmp #$0F
     bne .LiteralLenInY
     jsr Lz4ReadLenBytes
@@ -107,6 +104,9 @@ Lz4Flate::
     sta @A1T7L
     SET_A8
 
+    ; Restore token
+    pla
+
     ; Exit case, if offset was 0
     ldy $0000,X
     beq .Return
@@ -114,8 +114,6 @@ Lz4Flate::
     inx
     inx
 
-    ; Restore token
-    xba
     ; Lower nibble is match length
     and #$0F
     tay
@@ -139,6 +137,8 @@ Lz4Flate::
     plb
     rts
 
+; TODO: I think I can make this a lot faster by keeping the length in A16
+; and never going out to zero-page
 Lz4ReadLenBytes:
     sty <cnt
 .Loop:
