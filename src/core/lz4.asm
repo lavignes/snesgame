@@ -64,6 +64,11 @@ Lz4Flate::
 ; So M will always represent 4 to 19 inclusive. And we always perform
 ; the DMA of M bytes at the offset to WRAM.
 
+; TODO: We can't do real LZ4 with DMA since we cant copy WRAM->WRAM.
+; To be able to do RLE we need a special case:
+; I want to modify this so that when M=5 (i.e. zero in the stream) we will
+; change to a ABUS_FIXED mode. I guess this is LZ
+
 .NextToken:
     lda $0000,X
     inx
@@ -96,8 +101,12 @@ Lz4Flate::
     sta @MDMAEN
 
 .SkipLiteral:
-    ; We're going to read the offset word next, and subtract it from X
-    clc
+    ; Exit case: offset word is zero
+    ldy $0000,X
+    beq .Return
+
+    ; Subtract offset from X
+    sec
     txa
     sbc $0000,X
     ; Src: X-offset
@@ -106,10 +115,6 @@ Lz4Flate::
 
     ; Restore token
     pla
-
-    ; Exit case, if offset was 0
-    ldy $0000,X
-    beq .Return
 
     inx
     inx
