@@ -138,7 +138,8 @@ Lz4Flate::
     rts
 
 ; TODO: I think I can make this a lot faster by keeping the length in A16
-; and never going out to zero-page
+; and never going out to zero-page. We can also pretty much stay in A16
+; the entirety of the LZ4 loop
 Lz4ReadLenBytes:
     sty <cnt
 .Loop:
